@@ -164,6 +164,8 @@ func setupSandbox(cfg *config.Config, logger *zap.Logger, m *metrics.Metrics) (*
 		PidsLimit:       cfg.Docker.PidsLimit,
 		NetworkDisabled: true,
 		ReadOnly:        cfg.Docker.ReadOnly,
+		Registry:        cfg.Docker.Registry,
+		RegistryAuth:    cfg.Docker.RegistryAuth,
 	}
 
 	// Validate Docker is reachable before creating the sandbox.
@@ -247,14 +249,10 @@ func connectNATS(cfg *config.Config, logger *zap.Logger) (*nats.Conn, error) {
 
 func defaultPrewarmImages() []string {
 	return []string{
-		"python:3.12-slim",
-		"node:22-alpine",
-		"golang:1.24-alpine",
-		"gcc:13.3",
-		"eclipse-temurin:21-jdk",
-		"ruby:3.3-alpine",
-		"rust:1.82-alpine",
-		"php:8.3-cli-alpine",
-		"alpine:3.19",
+		"code-runtime-bash:latest",
+		"code-runtime-python:latest",
+		"code-runtime-nodejs:latest",
+		"code-runtime-golang:latest",
+		"code-runtime-java:latest",
 	}
 }

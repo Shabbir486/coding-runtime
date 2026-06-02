@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/docker/docker/api/types/filters"
@@ -12,6 +13,10 @@ import (
 	"github.com/docker/docker/client"
 	"go.uber.org/zap"
 )
+
+// localImagePrefix marks runtime images that are published to a remote
+// registry under <registry>/<tag> but referenced locally by the bare tag.
+const localImagePrefix = "code-runtime-"
 
 // ImagePool tracks which Docker images are already present on the host and
 // provides idempotent pull operations so that each image is only pulled once
@@ -21,15 +26,38 @@ type ImagePool struct {
 	images map[string]bool
 	mu     sync.RWMutex
 	logger *zap.Logger
+
+	// registry, when set, is the prefix from which bare code-runtime-* images
+	// are pulled on demand (e.g. <acct>.dkr.ecr.<region>.amazonaws.com). The
+	// pulled image is then re-tagged to its bare local name so callers can keep
+	// referencing code-runtime-<lang>:latest.
+	registry string
+	// registryAuth is the base64-encoded X-Registry-Auth value used for private
+	// registries (e.g. ECR). Empty for public/unauthenticated registries.
+	registryAuth string
 }
 
 // NewImagePool constructs an ImagePool backed by the provided Docker client.
-func NewImagePool(dockerClient *client.Client, logger *zap.Logger) *ImagePool {
+// registry and registryAuth may be empty, in which case images are pulled by
+// their bare name (suitable for public images or a pre-warmed host).
+func NewImagePool(dockerClient *client.Client, registry, registryAuth string, logger *zap.Logger) *ImagePool {
 	return &ImagePool{
-		client: dockerClient,
-		images: make(map[string]bool),
-		logger: logger,
+		client:       dockerClient,
+		images:       make(map[string]bool),
+		logger:       logger,
+		registry:     strings.TrimRight(registry, "/"),
+		registryAuth: registryAuth,
 	}
+}
+
+// resolvePullRef maps a locally-referenced image to the reference that should
+// actually be pulled. Bare code-runtime-* tags are pulled from the configured
+// registry; everything else (and the no-registry case) is pulled as-is.
+func (p *ImagePool) resolvePullRef(img string) string {
+	if p.registry != "" && strings.HasPrefix(img, localImagePrefix) {
+		return p.registry + "/" + img
+	}
+	return img
 }
 
 // EnsureImage guarantees the named image exists locally.  If it is already
@@ -61,11 +89,21 @@ func (p *ImagePool) EnsureImage(ctx context.Context, img string) error {
 // PullIfMissing unconditionally pulls the image.  Use EnsureImage when you
 // want the cheap local-check fast path.
 func (p *ImagePool) PullIfMissing(ctx context.Context, img string) error {
-	p.logger.Info("pulling docker image", zap.String("image", img))
+	pullRef := p.resolvePullRef(img)
+	p.logger.Info("pulling docker image",
+		zap.String("image", img),
+		zap.String("ref", pullRef),
+	)
 
-	reader, err := p.client.ImagePull(ctx, img, image.PullOptions{})
+	opts := image.PullOptions{}
+	// Auth is only relevant when pulling from the configured private registry.
+	if pullRef != img && p.registryAuth != "" {
+		opts.RegistryAuth = p.registryAuth
+	}
+
+	reader, err := p.client.ImagePull(ctx, pullRef, opts)
 	if err != nil {
-		return fmt.Errorf("image_pool: pull %q: %w", img, err)
+		return fmt.Errorf("image_pool: pull %q: %w", pullRef, err)
 	}
 	defer reader.Close()
 
@@ -93,6 +131,14 @@ func (p *ImagePool) PullIfMissing(ctx context.Context, img string) error {
 			zap.String("status", event.Status),
 			zap.String("layer", event.ID),
 		)
+	}
+
+	// When pulled from the registry under a prefixed ref, re-tag to the bare
+	// local name so callers (and ContainerCreate) can keep using it.
+	if pullRef != img {
+		if err := p.client.ImageTag(ctx, pullRef, img); err != nil {
+			return fmt.Errorf("image_pool: tag %q as %q: %w", pullRef, img, err)
+		}
 	}
 
 	p.markPresent(img)

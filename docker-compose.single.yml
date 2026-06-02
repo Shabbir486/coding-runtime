@@ -47,6 +47,12 @@ services:
       # Cap concurrent sandbox containers. This is the single most important
       # knob for fitting an 8 GB box — each sandbox is a sibling container.
       - CODERUNTIME_WORKER_COUNT=2
+      # On-demand image pulls: missing code-runtime-* images are pulled from
+      # this registry and re-tagged locally. Leave REGISTRY unset to disable.
+      # REGISTRY_AUTH is the base64 X-Registry-Auth for a private registry
+      # (e.g. ECR) — generate it with scripts/ecr-refresh-auth.sh.
+      - CODERUNTIME_DOCKER_REGISTRY=${REGISTRY:-}
+      - CODERUNTIME_DOCKER_REGISTRY_AUTH=${REGISTRY_AUTH:-}
     deploy:
       replicas: 1
       resources:

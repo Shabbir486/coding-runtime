@@ -123,6 +123,8 @@ type DockerConfig struct {
 	WorkDir            string        `mapstructure:"work_dir"`
 	MaxContainers      int           `mapstructure:"max_containers"`
 	ContainerNamespace string        `mapstructure:"container_namespace"`
+	Registry           string        `mapstructure:"registry"`      // prefix for on-demand runtime image pulls
+	RegistryAuth       string        `mapstructure:"registry_auth"` // base64 X-Registry-Auth for a private registry
 }
 
 // JWTConfig holds JWT signing settings.
@@ -292,6 +294,8 @@ func setDefaults(v *viper.Viper) {
 
 	// Docker
 	v.SetDefault("docker.host", "unix:///var/run/docker.sock")
+	v.SetDefault("docker.registry", "")
+	v.SetDefault("docker.registry_auth", "")
 	v.SetDefault("docker.tls_verify", false)
 	v.SetDefault("docker.network_mode", "none")
 	v.SetDefault("docker.pull_policy", "missing")

@@ -31,6 +31,8 @@ type SandboxConfig struct {
 	ReadOnly        bool   // read-only root filesystem
 	TmpfsSize       int64  // tmpfs size for /sandbox (bytes)
 	SeccompProfile  string // inline JSON seccomp profile
+	Registry        string // optional registry prefix for on-demand image pulls
+	RegistryAuth    string // optional base64 X-Registry-Auth for a private registry
 }
 
 // ExecutionRequest describes a single code-execution job.
@@ -113,7 +115,7 @@ func NewDockerSandbox(cfg SandboxConfig, logger *zap.Logger, m *metrics.Metrics)
 		return nil, fmt.Errorf("sandbox: docker daemon unreachable: %w", err)
 	}
 
-	pool := NewImagePool(dockerClient, logger)
+	pool := NewImagePool(dockerClient, cfg.Registry, cfg.RegistryAuth, logger)
 
 	return &DockerSandbox{
 		client:    dockerClient,
@@ -152,10 +154,17 @@ func (s *DockerSandbox) Execute(ctx context.Context, req *ExecutionRequest) (*Ex
 	// 1. Create an isolated working directory.
 	execID := uuid.New().String()
 	workDir := filepath.Join(s.cfg.WorkDir, execID)
-	// 0o755/0o644: world-readable so container users other than root can read
-	// the source file (e.g. groovy:4.0 runs as uid=1000, not root).
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	if err := os.MkdirAll(workDir, 0o777); err != nil {
 		return nil, fmt.Errorf("sandbox: create workdir: %w", err)
+	}
+	// The container process runs as a non-root user that varies per image
+	// (uid 10001, 1000, …). Compiled languages write build artifacts into
+	// /sandbox (e.g. Main.class, a.out), so the bind-mounted dir must be
+	// writable by an arbitrary uid. os.MkdirAll is subject to umask, so set
+	// the mode explicitly. The dir is per-execution, network-isolated, and
+	// removed immediately after, so 0o777 is safe here.
+	if err := os.Chmod(workDir, 0o777); err != nil {
+		return nil, fmt.Errorf("sandbox: chmod workdir: %w", err)
 	}
 	defer os.RemoveAll(workDir) // always cleanup
 
