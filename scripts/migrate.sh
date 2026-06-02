@@ -27,11 +27,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIGRATIONS_DIR="${SCRIPT_DIR}/migrations"
 
-DB_HOST="${DATABASE_HOST:-localhost}"
-DB_PORT="${DATABASE_PORT:-5432}"
-DB_USER="${DATABASE_USER:-coderuntime}"
-DB_PASS="${DATABASE_PASSWORD:-coderuntime123}"
-DB_NAME="${DATABASE_NAME:-coderuntime}"
+DB_HOST="${CODERUNTIME_DATABASE_HOST:-localhost}"
+DB_PORT="${CODERUNTIME_DATABASE_PORT:-5432}"
+DB_USER="${CODERUNTIME_DATABASE_USER:-coderuntime}"
+DB_PASS="${CODERUNTIME_DATABASE_PASSWORD:-coderuntime123}"
+DB_NAME="${CODERUNTIME_DATABASE_NAME:-coderuntime}"
 
 DRY_RUN=false
 ROLLBACK=false

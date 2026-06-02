@@ -15,8 +15,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install commonly used R packages
-RUN Rscript -e "options(repos = c(CRAN = 'https://cran.r-project.org')); \
+# Install commonly used R packages.
+# Omit `dependencies = TRUE`: the default (Depends/Imports/LinkingTo) installs
+# everything needed to LOAD and use these packages, but skips their Suggests
+# and Enhances (test/doc/geospatial tooling) that a runtime never needs. That
+# cuts the dependency tree from ~150 source builds to ~40. Ncpus parallelises
+# compilation across the available cores.
+RUN Rscript -e "options(repos = c(CRAN = 'https://cran.r-project.org'), Ncpus = max(1L, parallel::detectCores())); \
     install.packages(c( \
         'data.table', \
         'dplyr', \
@@ -28,7 +33,7 @@ RUN Rscript -e "options(repos = c(CRAN = 'https://cran.r-project.org')); \
         'lubridate', \
         'purrr', \
         'readr' \
-    ), dependencies = TRUE, quiet = TRUE)"
+    ), quiet = TRUE)"
 
 # Create non-root sandbox user
 RUN useradd -r -u 10001 -s /bin/false -d /sandbox -c "Sandbox execution user" sandbox
