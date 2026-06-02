@@ -1,0 +1,33 @@
+FROM golang:1.24-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-w -s" \
+    -trimpath \
+    -o queue-manager \
+    ./cmd/queue-manager/main.go
+
+# ---- Final stage ----
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates curl
+
+RUN adduser -S -u 10001 -G nobody -H -s /bin/false -g "queue-manager service account" queuemgr
+
+COPY --from=builder /app/queue-manager /queue-manager
+
+RUN chmod 555 /queue-manager && chown queuemgr:nobody /queue-manager
+
+USER queuemgr
+
+EXPOSE 8081
+
+ENTRYPOINT ["/queue-manager"]

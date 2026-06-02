@@ -1,0 +1,1316 @@
+openapi: "3.0.3"
+info:
+  title: Code Runtime API
+  description: |
+    A production-grade distributed code execution platform.
+
+    ## Overview
+    Code Runtime accepts source code submissions in 40+ programming languages
+    (including SQLite, MySQL, PostgreSQL, and MongoDB), executes them inside
+    isolated Docker containers, and returns stdout/stderr, timing, memory
+    usage, and a verdict.
+
+    ## Authentication
+    Every request (except `/health` and `/auth/token`) requires a valid bearer
+    token **or** an API key passed in the `X-Auth-Token` header.
+
+    ```
+    Authorization: Bearer <jwt>
+    X-Auth-Token:  <api-key>
+    ```
+
+    ## Rate Limiting
+    The default rate limit is **100 requests/minute** per IP (or per API key
+    for authenticated clients).  Headers `X-RateLimit-Limit`,
+    `X-RateLimit-Remaining`, and `X-RateLimit-Reset` are included in every
+    response.
+
+    ## Base64 Encoding
+    `source_code`, `stdin`, `expected_output`, and `stdout`/`stderr` in
+    responses are **base64-encoded** to avoid JSON escaping issues with binary
+    or multi-line content.
+  version: "1.0.0"
+  contact:
+    name: Code Runtime Support
+    email: support@coderuntime.io
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8002
+    description: Local development
+  - url: https://api.coderuntime.io
+    description: Production
+
+tags:
+  - name: auth
+    description: Token and API key management
+  - name: submissions
+    description: Code submission lifecycle
+  - name: languages
+    description: Supported programming languages
+  - name: statuses
+    description: Submission status reference
+  - name: system
+    description: Health and metrics
+
+# ---------------------------------------------------------------------------
+# Security schemes
+# ---------------------------------------------------------------------------
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT obtained from POST /auth/token
+    APIKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Auth-Token
+      description: Static API key for programmatic access
+
+  # -------------------------------------------------------------------------
+  # Schemas
+  # -------------------------------------------------------------------------
+  schemas:
+
+    # --- Submission ---
+    SubmissionRequest:
+      type: object
+      required:
+        - language_id
+        - source_code
+      properties:
+        language_id:
+          type: integer
+          minimum: 1
+          description: Language ID (see /languages)
+          example: 29
+        source_code:
+          type: string
+          description: Source code as plain text, or base64-encoded when the `base64_encoded=true` query parameter is set
+          example: "print(\"Hello, World!\")"
+        stdin:
+          type: string
+          description: Base64-encoded standard input
+          example: ""
+        expected_output:
+          type: string
+          description: Base64-encoded expected output for automatic verdict comparison
+          example: "SGVsbG8sIFdvcmxkIQo="
+        cpu_time_limit:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 30
+          description: CPU time limit in seconds (default 5.0)
+          example: 5.0
+        wall_time_limit:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 60
+          description: Wall-clock time limit in seconds (default 10.0)
+          example: 10.0
+        memory_limit:
+          type: integer
+          minimum: 0
+          maximum: 524288
+          description: Memory limit in kilobytes (default 262144 = 256 MB)
+          example: 262144
+        stack_limit:
+          type: integer
+          minimum: 0
+          maximum: 524288
+          description: Stack size limit in kilobytes (default 65536)
+          example: 65536
+        max_processes:
+          type: integer
+          minimum: 0
+          maximum: 120
+          description: Maximum number of processes/threads (default 60)
+          example: 60
+        max_file_size:
+          type: integer
+          minimum: 0
+          maximum: 8192
+          description: Maximum output file size in kilobytes (default 4096)
+          example: 4096
+        compiler_options:
+          type: string
+          maxLength: 512
+          description: Compiler flags (e.g. "-O2 -std=c++17")
+          example: "-O2 -std=c++17"
+        command_line_arguments:
+          type: string
+          maxLength: 512
+          description: Arguments passed to the program at runtime
+          example: "--input file.txt"
+        callback_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: Webhook URL called with the result when execution finishes
+          example: "https://my-app.com/webhooks/judge"
+        additional_files:
+          type: string
+          description: Base64-encoded ZIP archive of additional files placed in the sandbox
+
+    SubmissionResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          format: uuid
+          description: Unique submission identifier
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        language_id:
+          type: integer
+          example: 29
+        source_code:
+          type: string
+          description: Base64-encoded source code (only present when base64_encoded=true)
+          example: "cHJpbnQoIkhlbGxvLCBXb3JsZCEiKQ=="
+        stdin:
+          type: string
+          description: Base64-encoded stdin
+        stdout:
+          type: string
+          nullable: true
+          description: Base64-encoded stdout output
+          example: "SGVsbG8sIFdvcmxkIQo="
+        stderr:
+          type: string
+          nullable: true
+          description: Base64-encoded stderr output
+        compile_output:
+          type: string
+          nullable: true
+          description: Base64-encoded compiler output (populated on compilation error)
+        exit_code:
+          type: integer
+          nullable: true
+          description: Process exit code
+          example: 0
+        exit_signal:
+          type: string
+          nullable: true
+          description: Signal name that killed the process (e.g. SIGKILL)
+        message:
+          type: string
+          nullable: true
+          description: Human-readable status message
+        wall_time:
+          type: number
+          format: float
+          nullable: true
+          description: Elapsed wall-clock time in seconds
+          example: 0.042
+        cpu_time:
+          type: number
+          format: float
+          nullable: true
+          description: CPU time consumed in seconds
+          example: 0.038
+        memory:
+          type: integer
+          nullable: true
+          description: Peak memory usage in kilobytes
+          example: 9400
+        status:
+          $ref: '#/components/schemas/StatusInfo'
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-05-11T10:00:00Z"
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-05-11T10:00:01Z"
+
+    BatchSubmissionRequest:
+      type: object
+      required:
+        - submissions
+      properties:
+        submissions:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/SubmissionRequest'
+          description: Array of up to 20 submission requests
+
+    BatchSubmissionResponse:
+      type: object
+      properties:
+        tokens:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Array of tokens in the same order as the request submissions
+          example:
+            - "550e8400-e29b-41d4-a716-446655440000"
+            - "550e8400-e29b-41d4-a716-446655440001"
+
+    Language:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 29
+        name:
+          type: string
+          example: "Python (3.11.6)"
+        version:
+          type: string
+          example: "3.11.6"
+        source_file:
+          type: string
+          example: "main.py"
+        compile_command:
+          type: string
+          nullable: true
+          description: Null for interpreted languages
+        run_command:
+          type: string
+          example: "python3 main.py"
+        image:
+          type: string
+          description: Docker image used for execution
+          example: "judge0/python3:latest"
+        is_active:
+          type: boolean
+          example: true
+        max_memory:
+          type: integer
+          description: Default memory limit in kilobytes
+          example: 262144
+        max_cpu_time:
+          type: number
+          format: float
+          description: Default CPU time limit in seconds
+          example: 10.0
+        is_database:
+          type: boolean
+          description: True for SQL engines
+          example: false
+
+    Status:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 3
+        description:
+          type: string
+          example: "Accepted"
+
+    StatusInfo:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 3
+        description:
+          type: string
+          example: "Accepted"
+
+    TokenRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "demo@example.com"
+        password:
+          type: string
+          format: password
+          example: "demo"
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT bearer token
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        expires_at:
+          type: string
+          format: date-time
+          example: "2026-05-11T11:00:00Z"
+        token_type:
+          type: string
+          example: "Bearer"
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code
+          example: "validation_error"
+        message:
+          type: string
+          description: Human-readable error description
+          example: "language_id is required"
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional structured details (e.g. field-level validation errors)
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "ok"
+        version:
+          type: string
+          example: "v1.2.3"
+        timestamp:
+          type: string
+          format: date-time
+        services:
+          type: object
+          properties:
+            database:
+              type: string
+              enum: [ok, degraded, down]
+            redis:
+              type: string
+              enum: [ok, degraded, down]
+            nats:
+              type: string
+              enum: [ok, degraded, down]
+
+# ---------------------------------------------------------------------------
+# Security (global default)
+# ---------------------------------------------------------------------------
+security:
+  - BearerAuth: []
+  - APIKeyAuth: []
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+
+  # =========================================================================
+  # Auth
+  # =========================================================================
+  /auth/token:
+    post:
+      tags: [auth]
+      summary: Generate JWT token
+      description: Exchange credentials for a short-lived JWT bearer token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRequest'
+            example:
+              email: "demo@example.com"
+              password: "demo"
+      responses:
+        "200":
+          description: Token issued successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+              example:
+                access_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzQ3MDY1NjAwfQ.abc123"
+                expires_at: "2026-05-11T11:00:00Z"
+                token_type: "Bearer"
+        "400":
+          description: Missing or malformed request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "unauthorized"
+                message: "invalid email or password"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # =========================================================================
+  # Submissions
+  # =========================================================================
+  /submissions:
+    post:
+      tags: [submissions]
+      summary: Create a submission
+      description: |
+        Submit source code for execution. Set `?wait=true` to block until
+        execution completes (max ~30 s). The default (`wait=false`) enqueues
+        the job and returns immediately with status **In Queue**.
+
+        All string fields (`source_code`, `stdin`, `expected_output`) must be
+        **base64-encoded** when `base64_encoded=true` is passed as a query
+        parameter (recommended). Plain-text mode is supported for quick testing.
+      parameters:
+        - name: wait
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Wait for execution to complete before responding
+        - name: base64_encoded
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Treat source_code/stdin/expected_output as base64-encoded
+        - name: fields
+          in: query
+          schema:
+            type: string
+          description: Comma-separated list of fields to include in response
+          example: "token,status,stdout,stderr"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmissionRequest'
+            examples:
+              bash:
+                summary: "Bash (ID=1)"
+                value:
+                  language_id: 1
+                  source_code: 'echo "Hello, World!"'
+              c:
+                summary: "C (ID=2)"
+                value:
+                  language_id: 2
+                  source_code: |
+                    #include <stdio.h>
+                    int main() { printf("Hello, World!\n"); return 0; }
+              cpp:
+                summary: "C++ (ID=3)"
+                value:
+                  language_id: 3
+                  source_code: |
+                    #include<iostream>
+                    using namespace std;
+                    int main(){cout<<"Hello, World!"<<endl;}
+                  compiler_options: "-O2 -std=c++17"
+              csharp:
+                summary: "C# (ID=4)"
+                value:
+                  language_id: 4
+                  source_code: |
+                    using System;
+                    class Hello { static void Main(string[] a){Console.WriteLine("Hello, World!");}}
+              clojure:
+                summary: "Clojure (ID=5)"
+                value:
+                  language_id: 5
+                  source_code: '(println "Hello, World!")'
+              cobol:
+                summary: "COBOL (ID=6)"
+                value:
+                  language_id: 6
+                  source_code: |
+                    IDENTIFICATION DIVISION.
+                    PROGRAM-ID. HELLO.
+                    PROCEDURE DIVISION.
+                        DISPLAY "Hello, World!".
+                        STOP RUN.
+              coffeescript:
+                summary: "CoffeeScript (ID=7)"
+                value:
+                  language_id: 7
+                  source_code: 'console.log "Hello, World!"'
+              crystal:
+                summary: "Crystal (ID=8)"
+                value:
+                  language_id: 8
+                  source_code: 'puts "Hello, World!"'
+              d:
+                summary: "D (ID=9)"
+                value:
+                  language_id: 9
+                  source_code: |
+                    import std.stdio;
+                    void main(){writeln("Hello, World!");}
+              elixir:
+                summary: "Elixir (ID=10)"
+                value:
+                  language_id: 10
+                  source_code: 'IO.puts "Hello, World!"'
+              erlang:
+                summary: "Erlang (ID=11)"
+                value:
+                  language_id: 11
+                  source_code: |
+                    -module(main).
+                    -export([main/0]).
+                    main() -> io:format("Hello, World!~n").
+              fortran:
+                summary: "Fortran (ID=12)"
+                value:
+                  language_id: 12
+                  source_code: |
+                    program hello
+                      print *, "Hello, World!"
+                    end program hello
+              go:
+                summary: "Go (ID=13)"
+                value:
+                  language_id: 13
+                  source_code: |
+                    package main
+                    import "fmt"
+                    func main(){fmt.Println("Hello, World!")}
+              groovy:
+                summary: "Groovy (ID=14)"
+                value:
+                  language_id: 14
+                  source_code: 'println "Hello, World!"'
+              haskell:
+                summary: "Haskell (ID=15)"
+                value:
+                  language_id: 15
+                  source_code: 'main = putStrLn "Hello, World!"'
+              java:
+                summary: "Java (ID=16)"
+                value:
+                  language_id: 16
+                  source_code: 'class Main{public static void main(String[] a){System.out.println("Hello, World!");}}'
+              javascript:
+                summary: "JavaScript (ID=17)"
+                value:
+                  language_id: 17
+                  source_code: 'console.log("Hello, World!");'
+              kotlin:
+                summary: "Kotlin (ID=18)"
+                value:
+                  language_id: 18
+                  source_code: 'fun main(){println("Hello, World!")}'
+              common_lisp:
+                summary: "Common Lisp (ID=19)"
+                value:
+                  language_id: 19
+                  source_code: '(write-line "Hello, World!")'
+              lua:
+                summary: "Lua (ID=20)"
+                value:
+                  language_id: 20
+                  source_code: 'print("Hello, World!")'
+              nim:
+                summary: "Nim (ID=21)"
+                value:
+                  language_id: 21
+                  source_code: 'echo "Hello, World!"'
+              objective_c:
+                summary: "Objective-C (ID=22)"
+                value:
+                  language_id: 22
+                  source_code: |
+                    #import <Foundation/Foundation.h>
+                    int main(){NSLog(@"Hello, World!"); return 0;}
+              ocaml:
+                summary: "OCaml (ID=23)"
+                value:
+                  language_id: 23
+                  source_code: 'let () = print_endline "Hello, World!"'
+              pascal:
+                summary: "Pascal (ID=24)"
+                value:
+                  language_id: 24
+                  source_code: |
+                    program Hello;
+                    begin
+                      writeln('Hello, World!');
+                    end.
+              perl:
+                summary: "Perl (ID=25)"
+                value:
+                  language_id: 25
+                  source_code: 'print "Hello, World!\n";'
+              php:
+                summary: "PHP (ID=26)"
+                value:
+                  language_id: 26
+                  source_code: '<?php echo "Hello, World!\n"; ?>'
+              prolog:
+                summary: "Prolog (ID=27)"
+                value:
+                  language_id: 27
+                  source_code: ":- write('Hello, World!'), nl."
+              python2:
+                summary: "Python 2 (ID=28)"
+                value:
+                  language_id: 28
+                  source_code: 'print "Hello, World!"'
+              python3:
+                summary: "Python 3 (ID=29)"
+                value:
+                  language_id: 29
+                  source_code: 'print("Hello, World!")'
+              r:
+                summary: "R (ID=30)"
+                value:
+                  language_id: 30
+                  source_code: 'cat("Hello, World!\n")'
+              ruby:
+                summary: "Ruby (ID=31)"
+                value:
+                  language_id: 31
+                  source_code: 'puts "Hello, World!"'
+              rust:
+                summary: "Rust (ID=32)"
+                value:
+                  language_id: 32
+                  source_code: 'fn main(){println!("Hello, World!");}'
+              scala:
+                summary: "Scala (ID=33)"
+                value:
+                  language_id: 33
+                  source_code: 'object Main extends App{println("Hello, World!")}'
+              swift:
+                summary: "Swift (ID=34)"
+                value:
+                  language_id: 34
+                  source_code: 'print("Hello, World!")'
+              typescript:
+                summary: "TypeScript (ID=35)"
+                value:
+                  language_id: 35
+                  source_code: 'console.log("Hello, World!");'
+              vbnet:
+                summary: "VB.NET (ID=36)"
+                value:
+                  language_id: 36
+                  source_code: |
+                    Module Main
+                        Sub Main()
+                            Console.WriteLine("Hello, World!")
+                        End Sub
+                    End Module
+              sqlite:
+                summary: "SQLite (ID=37)"
+                value:
+                  language_id: 37
+                  source_code: "SELECT 'Hello, World!';"
+              mysql:
+                summary: "MySQL (ID=38)"
+                value:
+                  language_id: 38
+                  source_code: "SELECT 'Hello, World!';"
+              postgresql:
+                summary: "PostgreSQL (ID=39)"
+                value:
+                  language_id: 39
+                  source_code: "SELECT 'Hello, World!';"
+              mongodb:
+                summary: "MongoDB (ID=40)"
+                value:
+                  language_id: 40
+                  source_code: 'print("Hello, World!");'
+              mongodb_aggregation:
+                summary: "MongoDB — top-3 customers aggregation (ID=40)"
+                description: |
+                  Realistic mongosh `--nodb` problem: filter an in-memory
+                  orders dataset by year and refund flag, group by customer,
+                  sort by total spend, emit a CSV ranking. Self-checking —
+                  prints `OK` on success, exits 1 with `ASSERTION_FAILED: …`
+                  otherwise. Expected stdout (after the harmless mongosh
+                  config-dir warnings):
+                  ```
+                  rank,customer,orders,total
+                  1,bob,3,690.75
+                  2,carol,2,650.49
+                  3,alice,2,320.50
+                  OK
+                  ```
+                value:
+                  language_id: 40
+                  source_code: |
+                    // Complex MongoDB problem (mongosh --nodb):
+                    // Given a synthetic orders dataset, compute the top-3 customers
+                    // by total spend in 2025, exclude refunds, and emit a CSV.
+                    const orders = [
+                      { _id: ObjectId(), customer: "alice", amount: 120.50, refunded: false, date: ISODate("2025-01-12") },
+                      { _id: ObjectId(), customer: "bob",   amount: 250.00, refunded: false, date: ISODate("2025-02-03") },
+                      { _id: ObjectId(), customer: "alice", amount:  75.25, refunded: true,  date: ISODate("2025-02-15") },
+                      { _id: ObjectId(), customer: "carol", amount: 499.99, refunded: false, date: ISODate("2025-03-04") },
+                      { _id: ObjectId(), customer: "bob",   amount:  30.00, refunded: false, date: ISODate("2025-03-22") },
+                      { _id: ObjectId(), customer: "alice", amount: 200.00, refunded: false, date: ISODate("2025-04-09") },
+                      { _id: ObjectId(), customer: "dave",  amount:  15.00, refunded: false, date: ISODate("2025-04-11") },
+                      { _id: ObjectId(), customer: "carol", amount: 150.50, refunded: false, date: ISODate("2025-05-01") },
+                      { _id: ObjectId(), customer: "bob",   amount: 410.75, refunded: false, date: ISODate("2025-05-18") },
+                      { _id: ObjectId(), customer: "alice", amount:  60.00, refunded: false, date: ISODate("2024-12-31") }, // excluded by year
+                      { _id: ObjectId(), customer: "eve",   amount: 999.00, refunded: true,  date: ISODate("2025-06-02") }, // refunded
+                    ];
+
+                    const startOfYear = ISODate("2025-01-01");
+                    const endOfYear   = ISODate("2026-01-01");
+
+                    const stage1 = orders.filter(o =>
+                      !o.refunded && o.date >= startOfYear && o.date < endOfYear
+                    );
+
+                    const groups = {};
+                    for (const o of stage1) {
+                      if (!groups[o.customer]) groups[o.customer] = { total: 0, count: 0 };
+                      groups[o.customer].total += o.amount;
+                      groups[o.customer].count += 1;
+                    }
+
+                    const ranked = Object.entries(groups)
+                      .map(([customer, v]) => ({ customer, total: v.total, count: v.count }))
+                      .sort((a, b) => b.total - a.total)
+                      .slice(0, 3);
+
+                    print("rank,customer,orders,total");
+                    ranked.forEach((r, i) => {
+                      print(`${i + 1},${r.customer},${r.count},${r.total.toFixed(2)}`);
+                    });
+
+                    if (ranked.length !== 3) {
+                      print("ASSERTION_FAILED: expected 3 rows");
+                      quit(1);
+                    }
+                    if (ranked[0].customer !== "bob" || ranked[0].total.toFixed(2) !== "690.75") {
+                      print(`ASSERTION_FAILED: bob expected 690.75, got ${ranked[0].customer}=${ranked[0].total}`);
+                      quit(1);
+                    }
+                    if (ranked[1].customer !== "carol" || ranked[1].total.toFixed(2) !== "650.49") {
+                      print(`ASSERTION_FAILED: carol expected 650.49, got ${ranked[1].customer}=${ranked[1].total}`);
+                      quit(1);
+                    }
+                    if (ranked[2].customer !== "alice" || ranked[2].total.toFixed(2) !== "320.50") {
+                      print(`ASSERTION_FAILED: alice expected 320.50, got ${ranked[2].customer}=${ranked[2].total}`);
+                      quit(1);
+                    }
+
+                    print("OK");
+      responses:
+        "201":
+          description: Submission created (enqueued or executed synchronously)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionResponse'
+              examples:
+                async:
+                  summary: Async (wait=false)
+                  value:
+                    token: "550e8400-e29b-41d4-a716-446655440000"
+                    language_id: 29
+                    status:
+                      id: 1
+                      description: "In Queue"
+                    created_at: "2026-05-11T10:00:00Z"
+                    finished_at: null
+                sync_accepted:
+                  summary: Synchronous accepted
+                  value:
+                    token: "550e8400-e29b-41d4-a716-446655440000"
+                    language_id: 29
+                    stdout: "SGVsbG8sIFdvcmxkIQo="
+                    stderr: null
+                    exit_code: 0
+                    wall_time: 0.042
+                    cpu_time: 0.038
+                    memory: 9400
+                    status:
+                      id: 3
+                      description: "Accepted"
+                    created_at: "2026-05-11T10:00:00Z"
+                    finished_at: "2026-05-11T10:00:00Z"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "validation_error"
+                message: "language_id is required"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "422":
+          description: Constraint violation (limits exceed allowed maximums)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      tags: [submissions]
+      summary: List submissions
+      description: Paginated list of all submissions for the authenticated user.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: base64_encoded
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Paginated submission list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  submissions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SubmissionResponse'
+                  total:
+                    type: integer
+                    example: 1234
+                  page:
+                    type: integer
+                    example: 1
+                  per_page:
+                    type: integer
+                    example: 20
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /submissions/batch:
+    post:
+      tags: [submissions]
+      summary: Create a batch of submissions
+      description: |
+        Submit up to 20 code submissions in a single request.
+        Returns an array of tokens in the same order as the request.
+      parameters:
+        - name: base64_encoded
+          in: query
+          schema:
+            type: boolean
+            default: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchSubmissionRequest'
+            example:
+              submissions:
+                - language_id: 29
+                  source_code: "cHJpbnQoMSk="
+                - language_id: 29
+                  source_code: "cHJpbnQoMik="
+                - language_id: 13
+                  source_code: "cGFja2FnZSBtYWluCmltcG9ydCAiZm10IgpmdW5jIG1haW4oKSB7IGZtdC5QcmludGxuKCJIZWxsbyIpIH0="
+      responses:
+        "201":
+          description: Batch created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchSubmissionResponse'
+              example:
+                tokens:
+                  - "550e8400-e29b-41d4-a716-446655440000"
+                  - "550e8400-e29b-41d4-a716-446655440001"
+                  - "550e8400-e29b-41d4-a716-446655440002"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "422":
+          description: Batch size exceeds maximum (20)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /submissions/batch/{tokens}:
+    get:
+      tags: [submissions]
+      summary: Get batch of submissions by tokens
+      description: Retrieve multiple submissions in a single request. Tokens are comma-separated.
+      parameters:
+        - name: tokens
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Comma-separated list of submission tokens (max 20)
+          example: "550e8400-e29b-41d4-a716-446655440000,550e8400-e29b-41d4-a716-446655440001"
+        - name: base64_encoded
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Array of submission responses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubmissionResponse'
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /submissions/{token}:
+    get:
+      tags: [submissions]
+      summary: Get a submission by token
+      description: Retrieve the current state of a submission, including results if finished.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        - name: base64_encoded
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Return stdout/stderr/source_code as base64-encoded strings
+        - name: fields
+          in: query
+          schema:
+            type: string
+          description: Comma-separated list of fields to include
+          example: "token,status,stdout,stderr,wall_time,memory"
+      responses:
+        "200":
+          description: Submission details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmissionResponse'
+              examples:
+                in_queue:
+                  summary: Still in queue
+                  value:
+                    token: "550e8400-e29b-41d4-a716-446655440000"
+                    language_id: 29
+                    status:
+                      id: 1
+                      description: "In Queue"
+                    created_at: "2026-05-11T10:00:00Z"
+                    finished_at: null
+                accepted:
+                  summary: Accepted with output
+                  value:
+                    token: "550e8400-e29b-41d4-a716-446655440000"
+                    language_id: 29
+                    stdout: "SGVsbG8sIFdvcmxkIQo="
+                    stderr: null
+                    exit_code: 0
+                    wall_time: 0.042
+                    cpu_time: 0.038
+                    memory: 9400
+                    status:
+                      id: 3
+                      description: "Accepted"
+                    created_at: "2026-05-11T10:00:00Z"
+                    finished_at: "2026-05-11T10:00:00Z"
+                wrong_answer:
+                  summary: Wrong Answer
+                  value:
+                    token: "550e8400-e29b-41d4-a716-446655440000"
+                    language_id: 29
+                    stdout: "MTI="
+                    stderr: null
+                    exit_code: 0
+                    wall_time: 0.039
+                    status:
+                      id: 4
+                      description: "Wrong Answer"
+                    created_at: "2026-05-11T10:00:00Z"
+                    finished_at: "2026-05-11T10:00:00Z"
+                tle:
+                  summary: Time Limit Exceeded
+                  value:
+                    token: "550e8400-e29b-41d4-a716-446655440000"
+                    language_id: 29
+                    stdout: null
+                    exit_signal: "SIGKILL"
+                    wall_time: 5.001
+                    status:
+                      id: 5
+                      description: "Time Limit Exceeded"
+                    created_at: "2026-05-11T10:00:00Z"
+                    finished_at: "2026-05-11T10:00:05Z"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Submission not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "not_found"
+                message: "submission not found"
+
+    delete:
+      tags: [submissions]
+      summary: Delete a submission
+      description: Permanently delete a submission and its results.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Deleted successfully
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Submission not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # =========================================================================
+  # Languages
+  # =========================================================================
+  /languages:
+    get:
+      tags: [languages]
+      summary: List all languages
+      description: Returns all supported programming languages with metadata.
+      security: []
+      responses:
+        "200":
+          description: Array of languages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Language'
+              example:
+                - id: 3
+                  name: "C++ (GCC 12.2.0)"
+                  version: "12.2.0"
+                  source_file: "main.cpp"
+                  compile_command: "g++ main.cpp -o main -lm -std=c++17"
+                  run_command: "./main"
+                  image: "judge0/base:latest"
+                  is_active: true
+                  max_memory: 262144
+                  max_cpu_time: 5.0
+                  is_database: false
+                - id: 29
+                  name: "Python (3.11.6)"
+                  version: "3.11.6"
+                  source_file: "main.py"
+                  compile_command: null
+                  run_command: "python3 main.py"
+                  image: "judge0/python3:latest"
+                  is_active: true
+                  max_memory: 262144
+                  max_cpu_time: 10.0
+                  is_database: false
+
+  /languages/{id}:
+    get:
+      tags: [languages]
+      summary: Get a language by ID
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 29
+      responses:
+        "200":
+          description: Language details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Language'
+        "404":
+          description: Language not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # =========================================================================
+  # Statuses
+  # =========================================================================
+  /statuses:
+    get:
+      tags: [statuses]
+      summary: List all statuses
+      description: |
+        Returns the full status reference table.
+
+        | ID | Description              |
+        |----|--------------------------|
+        | 1  | In Queue                 |
+        | 2  | Processing               |
+        | 3  | Accepted                 |
+        | 4  | Wrong Answer             |
+        | 5  | Time Limit Exceeded      |
+        | 6  | Compilation Error        |
+        | 7  | Runtime Error (NZEC)     |
+        | 8  | Internal Error           |
+      security: []
+      responses:
+        "200":
+          description: Array of statuses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Status'
+              example:
+                - id: 1
+                  description: "In Queue"
+                - id: 2
+                  description: "Processing"
+                - id: 3
+                  description: "Accepted"
+                - id: 4
+                  description: "Wrong Answer"
+                - id: 5
+                  description: "Time Limit Exceeded"
+                - id: 6
+                  description: "Compilation Error"
+                - id: 7
+                  description: "Runtime Error (NZEC)"
+                - id: 8
+                  description: "Internal Error"
+
+  # =========================================================================
+  # System
+  # =========================================================================
+  /health:
+    get:
+      tags: [system]
+      summary: Health check
+      description: Returns service health and dependency status.
+      security: []
+      responses:
+        "200":
+          description: All systems operational
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "ok"
+                version: "v1.0.0"
+                timestamp: "2026-05-11T10:00:00Z"
+                services:
+                  database: "ok"
+                  redis: "ok"
+                  nats: "ok"
+        "503":
+          description: One or more dependencies degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /metrics:
+    get:
+      tags: [system]
+      summary: Prometheus metrics
+      description: Prometheus text-format metrics endpoint.
+      security: []
+      responses:
+        "200":
+          description: Prometheus metrics in text format
+          content:
+            text/plain:
+              schema:
+                type: string

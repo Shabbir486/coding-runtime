@@ -1,0 +1,52 @@
+apiVersion: 1
+
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus-ds
+    access: proxy
+    orgId: 1
+    url: http://prometheus:9090
+    basicAuth: false
+    isDefault: true
+    version: 1
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: jaeger-ds
+      manageAlerts: true
+      prometheusType: Prometheus
+      prometheusVersion: "2.55.0"
+      incrementalQuerying: true
+      incrementalQueryOverlapWindow: "10m"
+      cacheLevel: "High"
+
+  - name: Jaeger
+    type: jaeger
+    uid: jaeger-ds
+    access: proxy
+    orgId: 1
+    url: http://jaeger:16686
+    basicAuth: false
+    isDefault: false
+    version: 1
+    editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki-ds
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: true
+        filterBySpanID: false
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false

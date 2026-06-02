@@ -1,0 +1,100 @@
+# Production configuration overrides.
+# This file is merged on top of config.yaml when APP_ENV=production.
+# All secrets MUST be injected via environment variables (APP_DATABASE_PASSWORD, etc.)
+# and never stored in this file.
+
+server:
+  port: 8002
+  host: "0.0.0.0"
+  read_timeout: 30s
+  write_timeout: 60s
+  idle_timeout: 120s
+  shutdown_timeout: 60s
+  max_request_size: 10485760  # 10MB
+  mode: release
+
+database:
+  host: "${DB_HOST}"
+  port: 5432
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
+  dbname: "${DB_NAME}"
+  # Require TLS in production — never disable
+  sslmode: "require"
+  max_open_conns: 50
+  max_idle_conns: 20
+  conn_max_lifetime: 600s
+
+redis:
+  host: "${REDIS_HOST}"
+  port: 6379
+  password: "${REDIS_PASSWORD}"
+  db: 0
+  # Larger pool to handle production traffic spikes
+  pool_size: 50
+
+nats:
+  url: "${NATS_URL}"
+  subject: "submissions"
+  max_reconnects: 20
+  reconnect_wait: 5s
+
+auth:
+  # Must be overridden via APP_AUTH_JWT_SECRET env var — minimum 32 chars
+  jwt_secret: "${JWT_SECRET}"
+  jwt_expiry: 3600s
+  api_key_header: "X-Auth-Token"
+  allow_anonymous: false
+
+worker:
+  count: 8
+  max_concurrent: 16
+  ack_wait: 300s
+  poll_interval: 50ms
+
+# Stricter rate limits in production to protect against abuse
+rate_limit:
+  enabled: true
+  requests_per_min: 60
+  burst_size: 10
+  per_api_key_rpm: 300
+
+metrics:
+  enabled: true
+  namespace: "coderuntime"
+  subsystem: "api"
+
+# Enable distributed tracing in production
+tracing:
+  enabled: true
+  endpoint: "${OTEL_EXPORTER_OTLP_ENDPOINT}"
+  service_name: "code-runtime"
+  sampling_rate: 0.1   # 10% sampling in production to reduce overhead
+
+cors:
+  # Lock down CORS to known frontends in production
+  allow_origins:
+    - "https://app.coderuntime.io"
+    - "https://dashboard.coderuntime.io"
+  allow_methods:
+    - "GET"
+    - "POST"
+    - "DELETE"
+    - "OPTIONS"
+  allow_headers:
+    - "Origin"
+    - "Content-Type"
+    - "Authorization"
+    - "X-Auth-Token"
+    - "X-Request-ID"
+  expose_headers:
+    - "X-Request-ID"
+    - "X-RateLimit-Limit"
+    - "X-RateLimit-Remaining"
+  allow_credentials: true
+  max_age: 86400
+
+log:
+  level: "info"
+  format: "json"
+  output: "stdout"

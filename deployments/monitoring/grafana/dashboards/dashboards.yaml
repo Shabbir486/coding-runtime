@@ -1,0 +1,16 @@
+apiVersion: 1
+
+# Grafana picks up dashboard JSON files from this provider. Without this
+# YAML file in the provisioning/dashboards directory, Grafana ignores any
+# adjacent *.json files and no dashboards appear in the UI.
+providers:
+  - name: coderuntime
+    orgId: 1
+    folder: CodeRuntime
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

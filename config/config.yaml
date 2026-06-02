@@ -1,0 +1,95 @@
+server:
+  port: 8002
+  host: "0.0.0.0"
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+  shutdown_timeout: 30s
+  max_request_size: 10485760  # 10MB
+  mode: release
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "coderuntime"
+  password: "coderuntime123"
+  dbname: "coderuntime"
+  sslmode: "disable"
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime: 300s
+
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+  pool_size: 20
+
+nats:
+  url: "nats://localhost:4222"
+  subject: "submissions"
+  max_reconnects: 10
+  reconnect_wait: 2s
+
+docker:
+  host: "unix:///var/run/docker.sock"
+  api_version: "1.45"
+  sandbox_dir: "/tmp/sandbox"
+  pull_timeout: 300s
+  exec_timeout: 60s
+
+auth:
+  jwt_secret: "change-me-in-production"
+  jwt_expiry: 3600s
+  api_key_header: "X-Auth-Token"
+  allow_anonymous: false
+
+worker:
+  count: 4
+  max_concurrent: 8
+  ack_wait: 300s
+  poll_interval: 100ms
+
+rate_limit:
+  enabled: true
+  requests_per_min: 100
+  burst_size: 20
+  per_api_key_rpm: 500
+
+metrics:
+  enabled: true
+  namespace: "coderuntime"
+  subsystem: "api"
+
+tracing:
+  enabled: false
+  endpoint: "http://localhost:4318/v1/traces"
+  service_name: "code-runtime"
+  sampling_rate: 1.0
+
+cors:
+  allow_origins:
+    - "*"
+  allow_methods:
+    - "GET"
+    - "POST"
+    - "DELETE"
+    - "OPTIONS"
+  allow_headers:
+    - "Origin"
+    - "Content-Type"
+    - "Authorization"
+    - "X-Auth-Token"
+    - "X-Request-ID"
+  expose_headers:
+    - "X-Request-ID"
+    - "X-RateLimit-Limit"
+    - "X-RateLimit-Remaining"
+  allow_credentials: false
+  max_age: 86400
+
+log:
+  level: "debug"
+  format: "json"
+  output: "stdout"

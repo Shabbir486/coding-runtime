@@ -1,0 +1,240 @@
+version: '3.9'
+
+# Production overrides for docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  api:
+    image: ${REGISTRY}/coderuntime-api:${IMAGE_TAG:-latest}
+    build:
+      cache_from:
+        - ${REGISTRY}/coderuntime-api:latest
+    # No exposed ports in prod — traffic flows through load balancer / ingress
+    ports: []
+    environment:
+      # All env vars use the CODERUNTIME_ prefix because the binary loads them
+      # through Viper with SetEnvPrefix("CODERUNTIME"). Unprefixed names are
+      # silently ignored.
+      - CODERUNTIME_DATABASE_HOST=${DATABASE_HOST}
+      - CODERUNTIME_DATABASE_PORT=${DATABASE_PORT:-5432}
+      - CODERUNTIME_DATABASE_USER=${DATABASE_USER}
+      - CODERUNTIME_DATABASE_PASSWORD=${DATABASE_PASSWORD}
+      - CODERUNTIME_DATABASE_NAME=${DATABASE_NAME:-coderuntime}
+      - CODERUNTIME_DATABASE_SSL_MODE=require
+      - CODERUNTIME_DATABASE_MAX_OPEN_CONNS=50
+      - CODERUNTIME_DATABASE_MAX_IDLE_CONNS=10
+      - CODERUNTIME_REDIS_HOST=${REDIS_HOST}
+      - CODERUNTIME_REDIS_PORT=${REDIS_PORT:-6379}
+      - CODERUNTIME_REDIS_PASSWORD=${REDIS_PASSWORD}
+      - CODERUNTIME_NATS_URL=${NATS_URL}
+      - CODERUNTIME_JWT_SECRET=${JWT_SECRET}
+      - CODERUNTIME_LOG_LEVEL=info
+      - CODERUNTIME_LOG_FORMAT=json
+      - CODERUNTIME_SERVER_PORT=8002
+      - CODERUNTIME_RATE_LIMIT_LIMIT=500
+      - CODERUNTIME_RATE_LIMIT_PERIOD=60s
+      - CODERUNTIME_TRACING_ENABLED=true
+      - CODERUNTIME_TRACING_ENDPOINT=${OTEL_ENDPOINT}
+      - CODERUNTIME_TRACING_SERVICE_NAME=api-gateway
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: rolling-update
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "service=api"
+    networks:
+      - coderuntime
+
+  worker:
+    image: ${REGISTRY}/coderuntime-worker:${IMAGE_TAG:-latest}
+    build:
+      cache_from:
+        - ${REGISTRY}/coderuntime-worker:latest
+    environment:
+      - CODERUNTIME_DATABASE_HOST=${DATABASE_HOST}
+      - CODERUNTIME_DATABASE_PORT=${DATABASE_PORT:-5432}
+      - CODERUNTIME_DATABASE_USER=${DATABASE_USER}
+      - CODERUNTIME_DATABASE_PASSWORD=${DATABASE_PASSWORD}
+      - CODERUNTIME_DATABASE_NAME=${DATABASE_NAME:-coderuntime}
+      - CODERUNTIME_DATABASE_SSL_MODE=require
+      - CODERUNTIME_REDIS_HOST=${REDIS_HOST}
+      - CODERUNTIME_REDIS_PORT=${REDIS_PORT:-6379}
+      - CODERUNTIME_REDIS_PASSWORD=${REDIS_PASSWORD}
+      - CODERUNTIME_NATS_URL=${NATS_URL}
+      - CODERUNTIME_WORKER_COUNT=8
+      - CODERUNTIME_DOCKER_HOST=unix:///var/run/docker.sock
+      - CODERUNTIME_WORKER_TMP_DIR=/tmp/sandbox
+      - CODERUNTIME_WORKER_JOB_TIMEOUT=30s
+      - CODERUNTIME_DOCKER_CONTAINER_TIMEOUT=30s
+      - CODERUNTIME_DOCKER_NETWORK_MODE=none
+      - CODERUNTIME_LOG_LEVEL=info
+      - CODERUNTIME_LOG_FORMAT=json
+      - CODERUNTIME_TRACING_ENABLED=true
+      - CODERUNTIME_TRACING_ENDPOINT=${OTEL_ENDPOINT}
+      - CODERUNTIME_TRACING_SERVICE_NAME=worker
+    deploy:
+      replicas: 4
+      update_config:
+        parallelism: 1
+        delay: 15s
+        order: stop-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+        labels: "service=worker"
+    networks:
+      - coderuntime
+
+  postgres:
+    environment:
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME:-coderuntime}
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+    networks:
+      - coderuntime
+
+  redis:
+    ports: []
+    command: >
+      redis-server
+        --maxmemory 1gb
+        --maxmemory-policy allkeys-lru
+        --requirepass ${REDIS_PASSWORD}
+        --save 60 1000
+        --appendonly yes
+        --appendfsync everysec
+        --loglevel warning
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    networks:
+      - coderuntime
+
+  nats:
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      - coderuntime
+
+  prometheus:
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - coderuntime
+
+  grafana:
+    ports: []
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL}
+      GF_AUTH_GENERIC_OAUTH_ENABLED: "true"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      - coderuntime
+
+  jaeger:
+    ports: []
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    networks:
+      - coderuntime
+
+networks:
+  coderuntime:
+    driver: overlay
+    attachable: true
+    driver_opts:
+      encrypted: "true"

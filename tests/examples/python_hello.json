@@ -1,0 +1,11 @@
+{
+  "language_id": 29,
+  "source_code": "cHJpbnQoJ0hlbGxvLCBXb3JsZCEnKQ==",
+  "stdin": "",
+  "cpu_time_limit": 5.0,
+  "wall_time_limit": 10.0,
+  "memory_limit": 262144,
+  "stack_limit": 65536,
+  "max_processes": 60,
+  "max_file_size": 4096
+}

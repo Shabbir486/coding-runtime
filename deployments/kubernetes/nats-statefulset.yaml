@@ -1,0 +1,236 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: messaging
+spec:
+  serviceName: nats-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nats
+        app.kubernetes.io/component: messaging
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "7777"
+        prometheus.io/path: "/metrics"
+    spec:
+      shareProcessNamespace: true
+      terminationGracePeriodSeconds: 90
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: nats
+              topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: nats
+          image: nats:2.10-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: client
+              containerPort: 4222
+              protocol: TCP
+            - name: cluster
+              containerPort: 6222
+              protocol: TCP
+            - name: monitor
+              containerPort: 8222
+              protocol: TCP
+            - name: metrics
+              containerPort: 7777
+              protocol: TCP
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          command:
+            - nats-server
+            - --config
+            - /etc/nats/nats.conf
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: monitor
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /healthz?js-enabled-only=true&js-server-only=true
+              port: monitor
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - nats-server
+                  - --signal
+                  - ldm=$$$$
+
+          volumeMounts:
+            - name: nats-config-vol
+              mountPath: /etc/nats
+              readOnly: true
+            - name: jetstream-storage
+              mountPath: /data/jetstream
+            - name: tmp
+              mountPath: /tmp
+
+        # Prometheus exporter sidecar
+        - name: nats-exporter
+          image: natsio/prometheus-nats-exporter:0.15.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -connz
+            - -routez
+            - -subz
+            - -varz
+            - -jsz=all
+            - -port=7777
+            - http://localhost:8222
+          ports:
+            - name: metrics
+              containerPort: 7777
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+                - ALL
+
+      volumes:
+        - name: nats-config-vol
+          configMap:
+            name: nats-config
+        - name: tmp
+          emptyDir: {}
+
+  volumeClaimTemplates:
+    - metadata:
+        name: jetstream-storage
+        labels:
+          app.kubernetes.io/name: nats
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 10Gi
+
+---
+# Headless service for clustering
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats-headless
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: messaging
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: client
+    - name: cluster
+      port: 6222
+      targetPort: cluster
+    - name: monitor
+      port: 8222
+      targetPort: monitor
+
+---
+# Regular client-facing service
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: messaging
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "7777"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: client
+    - name: monitor
+      port: 8222
+      targetPort: monitor
+    - name: metrics
+      port: 7777
+      targetPort: metrics

@@ -1,0 +1,38 @@
+FROM golang:1.24-alpine AS builder
+WORKDIR /app
+
+# Install git for potential VCS dependencies
+RUN apk add --no-cache git
+
+# Copy dependency files first for layer caching
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
+
+# Copy full source
+COPY . .
+
+# Build with security and size optimizations
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-w -s" \
+    -trimpath \
+    -o /app/server \
+    ./cmd/api-gateway/main.go
+
+# ---- Final stage ----
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 10002 -s /bin/false -d /nonexistent -c "API service account" apiuser
+
+COPY --from=builder /app/server /server
+
+RUN chmod 555 /server && chown apiuser:apiuser /server
+
+EXPOSE 8002
+
+USER apiuser
+
+ENTRYPOINT ["/server"]

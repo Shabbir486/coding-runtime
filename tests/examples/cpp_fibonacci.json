@@ -1,0 +1,11 @@
+{
+  "language_id": 3,
+  "source_code": "I2luY2x1ZGUgPGlvc3RyZWFtPgojaW5jbHVkZSA8dmVjdG9yPgp1c2luZyBuYW1lc3BhY2Ugc3RkOwoKaW50IG1haW4oKSB7CiAgICBpbnQgbjsKICAgIGNpbiA+PiBuOwogICAgdmVjdG9yPGxvbmcgbG9uZz4gZmliKG4gKyAxKTsKICAgIGZpYlswXSA9IDA7CiAgICBpZiAobiA+PSAxKSBmaWJbMV0gPSAxOwogICAgZm9yIChpbnQgaSA9IDI7IGkgPD0gbjsgaSsrKSB7CiAgICAgICAgZmliW2ldID0gZmliW2ktMV0gKyBmaWJbaS0yXTsKICAgIH0KICAgIGNvdXQgPDwgIkZpYm9uYWNjaSBzZXF1ZW5jZSAoZmlyc3QgIiA8PCBuIDw8ICIgbnVtYmVycyk6IiA8PCBlbmRsOwogICAgZm9yIChpbnQgaSA9IDA7IGkgPCBuOyBpKyspIHsKICAgICAgICBjb3V0IDw8IGZpYltpXTsKICAgICAgICBpZiAoaSA8IG4gLSAxKSBjb3V0IDw8ICIsICI7CiAgICB9CiAgICBjb3V0IDw8IGVuZGw7CiAgICByZXR1cm4gMDsKfQ==",
+  "stdin": "MTAK",
+  "cpu_time_limit": 10.0,
+  "wall_time_limit": 15.0,
+  "memory_limit": 262144,
+  "stack_limit": 65536,
+  "max_processes": 60,
+  "max_file_size": 4096
+}

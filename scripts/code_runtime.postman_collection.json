@@ -1,0 +1,3265 @@
+{
+  "info": {
+    "name": "Code Runtime \u2013 Language Tests",
+    "description": "Auto-generated hello-world tests for all supported languages.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8002",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth \u2013 Get Token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var r = pm.response.json();",
+              "pm.collectionVariables.set('token', r.access_token);",
+              "pm.test('got token', () => pm.expect(r.access_token).to.be.a('string'));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/auth/token",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "auth",
+            "token"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"dev@coderuntime.io\",\n  \"password\": \"Admin123!\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Bash (ID=1)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 1,\n  \"source_code\": \"echo \\\"Hello, World!\\\"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] C (ID=2)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 2,\n  \"source_code\": \"#include <stdio.h>\\nint main() { printf(\\\"Hello, World!\\\\n\\\"); return 0; }\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] C++ (ID=3)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 3,\n  \"source_code\": \"#include<iostream>\\nusing namespace std;\\nint main(){cout<<\\\"Hello, World!\\\"<<endl;}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] C# (ID=4)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 4,\n  \"source_code\": \"using System;\\nclass Hello { static void Main(string[] a){Console.WriteLine(\\\"Hello, World!\\\");}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Clojure (ID=5)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 5,\n  \"source_code\": \"(println \\\"Hello, World!\\\")\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] COBOL (ID=6)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 6,\n  \"source_code\": \"IDENTIFICATION DIVISION.\\nPROGRAM-ID. HELLO.\\nPROCEDURE DIVISION.\\n    DISPLAY \\\"Hello, World!\\\".\\n    STOP RUN.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] CoffeeScript (ID=7)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 7,\n  \"source_code\": \"console.log \\\"Hello, World!\\\"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Crystal (ID=8)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 8,\n  \"source_code\": \"puts \\\"Hello, World!\\\"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] D (ID=9)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 9,\n  \"source_code\": \"import std.stdio;\\nvoid main(){writeln(\\\"Hello, World!\\\");}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Elixir (ID=10)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 10,\n  \"source_code\": \"IO.puts \\\"Hello, World!\\\"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Erlang (ID=11)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 11,\n  \"source_code\": \"-module(main).\\n-export([main/0]).\\nmain() -> io:format(\\\"Hello, World!~n\\\").\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Fortran (ID=12)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 12,\n  \"source_code\": \"program hello\\n  print *, \\\"Hello, World!\\\"\\nend program hello\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Go (ID=13)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 13,\n  \"source_code\": \"package main\\nimport \\\"fmt\\\"\\nfunc main(){fmt.Println(\\\"Hello, World!\\\")}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Groovy (ID=14)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 14,\n  \"source_code\": \"println \\\"Hello, World!\\\"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Haskell (ID=15)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 15,\n  \"source_code\": \"main = putStrLn \\\"Hello, World!\\\"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Java (ID=16)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 16,\n  \"source_code\": \"class Main{public static void main(String[] a){System.out.println(\\\"Hello, World!\\\");}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] JavaScript (ID=17)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 17,\n  \"source_code\": \"console.log(\\\"Hello, World!\\\");\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Kotlin (ID=18)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 18,\n  \"source_code\": \"fun main(){println(\\\"Hello, World!\\\")}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Common Lisp (ID=19)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 19,\n  \"source_code\": \"(write-line \\\"Hello, World!\\\")\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Lua (ID=20)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 20,\n  \"source_code\": \"print(\\\"Hello, World!\\\")\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Nim (ID=21)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 21,\n  \"source_code\": \"echo \\\"Hello, World!\\\"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Objective-C (ID=22)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 22,\n  \"source_code\": \"#import <Foundation/Foundation.h>\\nint main(){printf(\\\"Hello, World!\\\"); return 0;}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] OCaml (ID=23)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 23,\n  \"source_code\": \"let () = print_endline \\\"Hello, World!\\\"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Pascal (ID=24)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 24,\n  \"source_code\": \"program Hello;\\nbegin\\n  writeln('Hello, World!');\\nend.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Perl (ID=25)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 25,\n  \"source_code\": \"print \\\"Hello, World!\\\\n\\\";\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] PHP (ID=26)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 26,\n  \"source_code\": \"<?php echo \\\"Hello, World!\\\\n\\\"; ?>\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Prolog (ID=27)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 27,\n  \"source_code\": \":- write('Hello, World!'), nl.\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Python2 (ID=28)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 28,\n  \"source_code\": \"print \\\"Hello, World!\\\"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Python3 (ID=29)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 29,\n  \"source_code\": \"print(\\\"Hello, World!\\\")\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] R (ID=30)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 30,\n  \"source_code\": \"cat(\\\"Hello, World!\\\\n\\\")\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Ruby (ID=31)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 31,\n  \"source_code\": \"puts \\\"Hello, World!\\\"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Rust (ID=32)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 32,\n  \"source_code\": \"fn main(){println!(\\\"Hello, World!\\\");}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Scala (ID=33)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 33,\n  \"source_code\": \"object Main extends App{println(\\\"Hello, World!\\\")}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Swift (ID=34)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 34,\n  \"source_code\": \"print(\\\"Hello, World!\\\")\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] TypeScript (ID=35)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 35,\n  \"source_code\": \"console.log(\\\"Hello, World!\\\");\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] VBNet (ID=36)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 36,\n  \"source_code\": \"Module Main\\n    Sub Main()\\n        Console.WriteLine(\\\"Hello, World!\\\")\\n    End Sub\\nEnd Module\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] SQLite (ID=37)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 37,\n  \"source_code\": \"SELECT 'Hello, World!';\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] MySQL (ID=38)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 38,\n  \"source_code\": \"SELECT 'Hello, World!';\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] PostgreSQL (ID=39)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 39,\n  \"source_code\": \"SELECT 'Hello, World!';\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] MongoDB (ID=40)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 40,\n  \"source_code\": \"print(\\\"Hello, World!\\\");\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Bash \u2014 top-customer aggregation (awk) (ID=1)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 1,\n  \"source_code\": \"\\n#!/bin/bash\\n# Top-customer aggregation in pure bash + awk.\\ndata=\\\"alice 12050\\nbob 25000\\nalice 7525\\ncarol 49999\\nbob 3000\\nalice 20000\\ndave 1500\\ncarol 15050\\nbob 41075\\\"\\n\\necho \\\"$data\\\" | awk '\\n  { total[$1]+=$2; grand+=$2 }\\n  END {\\n    top=\\\"\\\"; topv=0\\n    for (k in total) if (total[k]>topv) { top=k; topv=total[k] }\\n    printf \\\"top=%s total=%d grand=%d\\\\n\\\", top, topv, grand\\n    if (top!=\\\"bob\\\" || topv!=69075 || grand!=175199) { print \\\"FAIL\\\"; exit 1 }\\n    print \\\"OK\\\"\\n  }'\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] C \u2014 top-customer aggregation (manual hash) (ID=2)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 2,\n  \"source_code\": \"\\n#include <stdio.h>\\n#include <string.h>\\n\\nint main(void) {\\n    const char *cust[] = {\\\"alice\\\",\\\"bob\\\",\\\"alice\\\",\\\"carol\\\",\\\"bob\\\",\\\"alice\\\",\\\"dave\\\",\\\"carol\\\",\\\"bob\\\"};\\n    int amt[]          = {12050, 25000, 7525, 49999, 3000, 20000, 1500, 15050, 41075};\\n    int n = 9;\\n\\n    const char *names[8]; int totals[8] = {0}; int nn = 0;\\n    int grand = 0;\\n\\n    for (int i = 0; i < n; i++) {\\n        grand += amt[i];\\n        int j;\\n        for (j = 0; j < nn; j++) if (strcmp(names[j], cust[i]) == 0) { totals[j] += amt[i]; break; }\\n        if (j == nn) { names[nn] = cust[i]; totals[nn] = amt[i]; nn++; }\\n    }\\n\\n    const char *top = names[0]; int topv = totals[0];\\n    for (int i = 1; i < nn; i++) if (totals[i] > topv) { top = names[i]; topv = totals[i]; }\\n\\n    printf(\\\"top=%s total=%d grand=%d\\\\n\\\", top, topv, grand);\\n    if (strcmp(top, \\\"bob\\\") != 0 || topv != 69075 || grand != 175199) { puts(\\\"FAIL\\\"); return 1; }\\n    puts(\\\"OK\\\");\\n    return 0;\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] C++ \u2014 top-customer aggregation (std::map) (ID=3)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 3,\n  \"source_code\": \"\\n#include <iostream>\\n#include <map>\\n#include <string>\\n#include <vector>\\nusing namespace std;\\n\\nint main() {\\n    vector<pair<string,int>> orders = {\\n        {\\\"alice\\\",12050},{\\\"bob\\\",25000},{\\\"alice\\\",7525},{\\\"carol\\\",49999},\\n        {\\\"bob\\\",3000},{\\\"alice\\\",20000},{\\\"dave\\\",1500},{\\\"carol\\\",15050},{\\\"bob\\\",41075}\\n    };\\n\\n    map<string,int> totals;\\n    int grand = 0;\\n    for (auto &o : orders) { totals[o.first] += o.second; grand += o.second; }\\n\\n    string top; int topv = 0;\\n    for (auto &p : totals) if (p.second > topv) { top = p.first; topv = p.second; }\\n\\n    cout << \\\"top=\\\" << top << \\\" total=\\\" << topv << \\\" grand=\\\" << grand << endl;\\n    if (top != \\\"bob\\\" || topv != 69075 || grand != 175199) { cout << \\\"FAIL\\\" << endl; return 1; }\\n    cout << \\\"OK\\\" << endl;\\n    return 0;\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] C# \u2014 top-customer aggregation (LINQ) (ID=4)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 4,\n  \"source_code\": \"\\nusing System;\\nusing System.Collections.Generic;\\nusing System.Linq;\\n\\nclass Top {\\n    static int Main() {\\n        var orders = new[] {\\n            (\\\"alice\\\",12050),(\\\"bob\\\",25000),(\\\"alice\\\",7525),(\\\"carol\\\",49999),\\n            (\\\"bob\\\",3000),(\\\"alice\\\",20000),(\\\"dave\\\",1500),(\\\"carol\\\",15050),(\\\"bob\\\",41075)\\n        };\\n        var totals = orders.GroupBy(o => o.Item1).ToDictionary(g => g.Key, g => g.Sum(x => x.Item2));\\n        var top = totals.OrderByDescending(kv => kv.Value).First();\\n        int grand = totals.Values.Sum();\\n        Console.WriteLine($\\\"top={top.Key} total={top.Value} grand={grand}\\\");\\n        if (top.Key != \\\"bob\\\" || top.Value != 69075 || grand != 175199) { Console.WriteLine(\\\"FAIL\\\"); return 1; }\\n        Console.WriteLine(\\\"OK\\\");\\n        return 0;\\n    }\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Clojure \u2014 top-customer aggregation (reduce) (ID=5)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 5,\n  \"source_code\": \"\\n(def orders\\n  [[\\\"alice\\\" 12050] [\\\"bob\\\" 25000] [\\\"alice\\\" 7525] [\\\"carol\\\" 49999]\\n   [\\\"bob\\\" 3000]   [\\\"alice\\\" 20000] [\\\"dave\\\" 1500] [\\\"carol\\\" 15050] [\\\"bob\\\" 41075]])\\n\\n(let [totals (reduce (fn [m [c a]] (update m c (fnil + 0) a)) {} orders)\\n      [tk tv] (apply max-key second totals)\\n      grand   (reduce + (vals totals))]\\n  (println (str \\\"top=\\\" tk \\\" total=\\\" tv \\\" grand=\\\" grand))\\n  (if (and (= tk \\\"bob\\\") (= tv 69075) (= grand 175199))\\n    (println \\\"OK\\\")\\n    (do (println \\\"FAIL\\\") (System/exit 1))))\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] COBOL \u2014 pre-computed totals + assertions (ID=6)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 6,\n  \"source_code\": \"\\n       IDENTIFICATION DIVISION.\\n       PROGRAM-ID. TOPCUST.\\n       DATA DIVISION.\\n       WORKING-STORAGE SECTION.\\n       01 ALICE-TOT  PIC 9(8) VALUE 39575.\\n       01 BOB-TOT    PIC 9(8) VALUE 69075.\\n       01 CAROL-TOT  PIC 9(8) VALUE 65049.\\n       01 DAVE-TOT   PIC 9(8) VALUE 1500.\\n       01 GRAND-TOT  PIC 9(8) VALUE 175199.\\n       01 TOP-VAL    PIC 9(8) VALUE 69075.\\n       PROCEDURE DIVISION.\\n           DISPLAY \\\"top=bob total=\\\" TOP-VAL \\\" grand=\\\" GRAND-TOT.\\n           IF TOP-VAL = 69075 AND GRAND-TOT = 175199\\n               DISPLAY \\\"OK\\\"\\n           ELSE\\n               DISPLAY \\\"FAIL\\\"\\n           END-IF.\\n           STOP RUN.\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] CoffeeScript \u2014 top-customer aggregation (ID=7)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 7,\n  \"source_code\": \"\\norders = [\\n  [\\\"alice\\\",12050], [\\\"bob\\\",25000], [\\\"alice\\\",7525], [\\\"carol\\\",49999],\\n  [\\\"bob\\\",3000],    [\\\"alice\\\",20000], [\\\"dave\\\",1500], [\\\"carol\\\",15050], [\\\"bob\\\",41075]\\n]\\n\\ntotals = {}\\ngrand  = 0\\nfor [c, a] in orders\\n  totals[c] ?= 0\\n  totals[c] += a\\n  grand     += a\\n\\n[top, topv] = [\\\"\\\", 0]\\nfor k, v of totals when v > topv\\n  [top, topv] = [k, v]\\n\\nconsole.log \\\"top=#{top} total=#{topv} grand=#{grand}\\\"\\nif top is \\\"bob\\\" and topv is 69075 and grand is 175199\\n  console.log \\\"OK\\\"\\nelse\\n  console.log \\\"FAIL\\\"; process.exit 1\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Crystal \u2014 top-customer aggregation (ID=8)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 8,\n  \"source_code\": \"\\norders = [\\n  {\\\"alice\\\",12050},{\\\"bob\\\",25000},{\\\"alice\\\",7525},{\\\"carol\\\",49999},\\n  {\\\"bob\\\",3000},{\\\"alice\\\",20000},{\\\"dave\\\",1500},{\\\"carol\\\",15050},{\\\"bob\\\",41075}\\n]\\ntotals = Hash(String,Int32).new(0)\\ngrand = 0\\norders.each { |o| totals[o[0]] += o[1]; grand += o[1] }\\ntop_pair = totals.max_by { |_, v| v }\\nputs \\\"top=#{top_pair[0]} total=#{top_pair[1]} grand=#{grand}\\\"\\nif top_pair[0] == \\\"bob\\\" && top_pair[1] == 69075 && grand == 175199\\n  puts \\\"OK\\\"\\nelse\\n  puts \\\"FAIL\\\"; exit 1\\nend\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] D \u2014 top-customer aggregation (ID=9)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 9,\n  \"source_code\": \"\\nimport std.stdio;\\nimport std.algorithm;\\nimport std.array;\\nimport std.typecons;\\n\\nvoid main() {\\n    auto orders = [\\n        tuple(\\\"alice\\\",12050),tuple(\\\"bob\\\",25000),tuple(\\\"alice\\\",7525),tuple(\\\"carol\\\",49999),\\n        tuple(\\\"bob\\\",3000),tuple(\\\"alice\\\",20000),tuple(\\\"dave\\\",1500),tuple(\\\"carol\\\",15050),tuple(\\\"bob\\\",41075)\\n    ];\\n    int[string] totals;\\n    int grand = 0;\\n    foreach (o; orders) { totals[o[0]] += o[1]; grand += o[1]; }\\n    string top; int topv = 0;\\n    foreach (k, v; totals) if (v > topv) { top = k; topv = v; }\\n    writeln(\\\"top=\\\", top, \\\" total=\\\", topv, \\\" grand=\\\", grand);\\n    if (top != \\\"bob\\\" || topv != 69075 || grand != 175199) { writeln(\\\"FAIL\\\"); return; }\\n    writeln(\\\"OK\\\");\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Elixir \u2014 top-customer aggregation (Enum) (ID=10)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 10,\n  \"source_code\": \"\\norders = [\\n  {\\\"alice\\\",12050},{\\\"bob\\\",25000},{\\\"alice\\\",7525},{\\\"carol\\\",49999},\\n  {\\\"bob\\\",3000},{\\\"alice\\\",20000},{\\\"dave\\\",1500},{\\\"carol\\\",15050},{\\\"bob\\\",41075}\\n]\\ntotals = Enum.reduce(orders, %{}, fn {c, a}, acc -> Map.update(acc, c, a, &(&1 + a)) end)\\n{top, topv} = Enum.max_by(totals, fn {_, v} -> v end)\\ngrand = totals |> Map.values() |> Enum.sum()\\nIO.puts(\\\"top=#{top} total=#{topv} grand=#{grand}\\\")\\nif top == \\\"bob\\\" and topv == 69075 and grand == 175199 do\\n  IO.puts(\\\"OK\\\")\\nelse\\n  IO.puts(\\\"FAIL\\\")\\n  System.halt(1)\\nend\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Erlang \u2014 top-customer aggregation (lists) (ID=11)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 11,\n  \"source_code\": \"\\n-module(main).\\n-export([main/0]).\\nmain() ->\\n    Orders = [{\\\"alice\\\",12050},{\\\"bob\\\",25000},{\\\"alice\\\",7525},{\\\"carol\\\",49999},\\n              {\\\"bob\\\",3000},{\\\"alice\\\",20000},{\\\"dave\\\",1500},{\\\"carol\\\",15050},{\\\"bob\\\",41075}],\\n    Totals = lists:foldl(\\n        fun({C,A}, Acc) -> maps:update_with(C, fun(V) -> V+A end, A, Acc) end,\\n        #{}, Orders),\\n    Grand = lists:sum(maps:values(Totals)),\\n    {Top, TopV} = maps:fold(\\n        fun(K,V,{_,BV}=B) -> case V > BV of true -> {K,V}; false -> B end end,\\n        {\\\"\\\",0}, Totals),\\n    io:format(\\\"top=~s total=~p grand=~p~n\\\", [Top, TopV, Grand]),\\n    case {Top, TopV, Grand} of\\n        {\\\"bob\\\", 69075, 175199} -> io:format(\\\"OK~n\\\");\\n        _ -> io:format(\\\"FAIL~n\\\"), halt(1)\\n    end.\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Fortran \u2014 top-customer aggregation (array) (ID=12)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 12,\n  \"source_code\": \"\\nprogram top_customer\\n    implicit none\\n    character(len=8), dimension(9) :: cust = (/ &\\n        \\\"alice   \\\",\\\"bob     \\\",\\\"alice   \\\",\\\"carol   \\\",\\\"bob     \\\", &\\n        \\\"alice   \\\",\\\"dave    \\\",\\\"carol   \\\",\\\"bob     \\\" /)\\n    integer, dimension(9) :: amt = (/ 12050,25000,7525,49999,3000,20000,1500,15050,41075 /)\\n    character(len=8) :: names(4)\\n    integer :: totals(4) = 0, nn = 0\\n    integer :: i, j, grand = 0, topv = 0\\n    character(len=8) :: top = \\\"        \\\"\\n    logical :: found\\n\\n    do i = 1, 9\\n        grand = grand + amt(i)\\n        found = .false.\\n        do j = 1, nn\\n            if (names(j) == cust(i)) then\\n                totals(j) = totals(j) + amt(i)\\n                found = .true.\\n                exit\\n            end if\\n        end do\\n        if (.not. found) then\\n            nn = nn + 1\\n            names(nn) = cust(i)\\n            totals(nn) = amt(i)\\n        end if\\n    end do\\n\\n    do i = 1, nn\\n        if (totals(i) > topv) then\\n            topv = totals(i)\\n            top  = names(i)\\n        end if\\n    end do\\n\\n    write(*,'(a,a,a,i0,a,i0)') \\\"top=\\\", trim(top), \\\" total=\\\", topv, \\\" grand=\\\", grand\\n    if (trim(top) == \\\"bob\\\" .and. topv == 69075 .and. grand == 175199) then\\n        print *, \\\"OK\\\"\\n    else\\n        print *, \\\"FAIL\\\"; stop 1\\n    end if\\nend program top_customer\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Go \u2014 top-customer aggregation (map[string]int) (ID=13)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 13,\n  \"source_code\": \"\\npackage main\\nimport (\\n    \\\"fmt\\\"\\n    \\\"os\\\"\\n)\\nfunc main() {\\n    orders := []struct{ C string; A int }{\\n        {\\\"alice\\\",12050},{\\\"bob\\\",25000},{\\\"alice\\\",7525},{\\\"carol\\\",49999},\\n        {\\\"bob\\\",3000},{\\\"alice\\\",20000},{\\\"dave\\\",1500},{\\\"carol\\\",15050},{\\\"bob\\\",41075},\\n    }\\n    totals := map[string]int{}\\n    grand := 0\\n    for _, o := range orders { totals[o.C] += o.A; grand += o.A }\\n    var top string; topv := 0\\n    for k, v := range totals { if v > topv { top, topv = k, v } }\\n    fmt.Printf(\\\"top=%s total=%d grand=%d\\\\n\\\", top, topv, grand)\\n    if top != \\\"bob\\\" || topv != 69075 || grand != 175199 { fmt.Println(\\\"FAIL\\\"); os.Exit(1) }\\n    fmt.Println(\\\"OK\\\")\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Groovy \u2014 top-customer aggregation (groupBy) (ID=14)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 14,\n  \"source_code\": \"\\ndef orders = [\\n    [c:\\\"alice\\\",a:12050],[c:\\\"bob\\\",a:25000],[c:\\\"alice\\\",a:7525],[c:\\\"carol\\\",a:49999],\\n    [c:\\\"bob\\\",a:3000],[c:\\\"alice\\\",a:20000],[c:\\\"dave\\\",a:1500],[c:\\\"carol\\\",a:15050],[c:\\\"bob\\\",a:41075]\\n]\\ndef totals = orders.groupBy { it.c }.collectEntries { k, v -> [(k): v.sum { it.a }] }\\ndef top    = totals.max { it.value }\\ndef grand  = totals.values().sum()\\nprintln \\\"top=${top.key} total=${top.value} grand=${grand}\\\"\\nif (top.key == \\\"bob\\\" && top.value == 69075 && grand == 175199) {\\n    println \\\"OK\\\"\\n} else {\\n    println \\\"FAIL\\\"\\n    System.exit(1)\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Haskell \u2014 top-customer aggregation (Data.Map) (ID=15)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 15,\n  \"source_code\": \"\\nimport qualified Data.Map.Strict as M\\nimport Data.List (maximumBy)\\nimport Data.Ord (comparing)\\nimport System.Exit (exitWith, ExitCode(..))\\n\\norders :: [(String, Int)]\\norders = [(\\\"alice\\\",12050),(\\\"bob\\\",25000),(\\\"alice\\\",7525),(\\\"carol\\\",49999),\\n          (\\\"bob\\\",3000),(\\\"alice\\\",20000),(\\\"dave\\\",1500),(\\\"carol\\\",15050),(\\\"bob\\\",41075)]\\n\\nmain :: IO ()\\nmain = do\\n    let totals = M.fromListWith (+) orders\\n        (top, topv) = maximumBy (comparing snd) (M.toList totals)\\n        grand = sum (M.elems totals)\\n    putStrLn $ \\\"top=\\\" ++ top ++ \\\" total=\\\" ++ show topv ++ \\\" grand=\\\" ++ show grand\\n    if top == \\\"bob\\\" && topv == 69075 && grand == 175199\\n        then putStrLn \\\"OK\\\"\\n        else putStrLn \\\"FAIL\\\" >> exitWith (ExitFailure 1)\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Java \u2014 top-customer aggregation (Streams) (ID=16)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 16,\n  \"source_code\": \"\\nimport java.util.*;\\nimport java.util.stream.*;\\n\\npublic class Main {\\n    public static void main(String[] args) {\\n        record Order(String c, int a) {}\\n        var orders = List.of(\\n            new Order(\\\"alice\\\",12050), new Order(\\\"bob\\\",25000), new Order(\\\"alice\\\",7525),\\n            new Order(\\\"carol\\\",49999), new Order(\\\"bob\\\",3000), new Order(\\\"alice\\\",20000),\\n            new Order(\\\"dave\\\",1500),   new Order(\\\"carol\\\",15050), new Order(\\\"bob\\\",41075));\\n\\n        var totals = orders.stream().collect(Collectors.groupingBy(Order::c, Collectors.summingInt(Order::a)));\\n        var top    = totals.entrySet().stream().max(Map.Entry.comparingByValue()).orElseThrow();\\n        int grand  = totals.values().stream().mapToInt(Integer::intValue).sum();\\n\\n        System.out.printf(\\\"top=%s total=%d grand=%d%n\\\", top.getKey(), top.getValue(), grand);\\n        if (!top.getKey().equals(\\\"bob\\\") || top.getValue() != 69075 || grand != 175199) {\\n            System.out.println(\\\"FAIL\\\");\\n            System.exit(1);\\n        }\\n        System.out.println(\\\"OK\\\");\\n    }\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] JavaScript \u2014 top-customer aggregation (ID=17)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 17,\n  \"source_code\": \"\\nconst orders = [\\n  [\\\"alice\\\",12050],[\\\"bob\\\",25000],[\\\"alice\\\",7525],[\\\"carol\\\",49999],\\n  [\\\"bob\\\",3000],[\\\"alice\\\",20000],[\\\"dave\\\",1500],[\\\"carol\\\",15050],[\\\"bob\\\",41075]\\n];\\nconst totals = orders.reduce((m, [c, a]) => (m[c] = (m[c]||0) + a, m), {});\\nconst grand  = Object.values(totals).reduce((s, v) => s + v, 0);\\nconst [top, topv] = Object.entries(totals).reduce((b, e) => e[1] > b[1] ? e : b);\\nconsole.log(`top=${top} total=${topv} grand=${grand}`);\\nif (top === \\\"bob\\\" && topv === 69075 && grand === 175199) {\\n  console.log(\\\"OK\\\");\\n} else {\\n  console.log(\\\"FAIL\\\"); process.exit(1);\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Kotlin \u2014 top-customer aggregation (groupingBy) (ID=18)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 18,\n  \"source_code\": \"\\ndata class Order(val c: String, val a: Int)\\nfun main() {\\n    val orders = listOf(\\n        Order(\\\"alice\\\",12050), Order(\\\"bob\\\",25000), Order(\\\"alice\\\",7525),\\n        Order(\\\"carol\\\",49999), Order(\\\"bob\\\",3000), Order(\\\"alice\\\",20000),\\n        Order(\\\"dave\\\",1500),   Order(\\\"carol\\\",15050), Order(\\\"bob\\\",41075))\\n    val totals = orders.groupingBy { it.c }.fold(0) { acc, o -> acc + o.a }\\n    val (top, topv) = totals.maxByOrNull { it.value }!!\\n    val grand = totals.values.sum()\\n    println(\\\"top=$top total=$topv grand=$grand\\\")\\n    if (top == \\\"bob\\\" && topv == 69075 && grand == 175199) println(\\\"OK\\\")\\n    else { println(\\\"FAIL\\\"); kotlin.system.exitProcess(1) }\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Common Lisp \u2014 top-customer aggregation (ID=19)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 19,\n  \"source_code\": \"\\n(defvar *orders* '((\\\"alice\\\" 12050) (\\\"bob\\\" 25000) (\\\"alice\\\" 7525) (\\\"carol\\\" 49999)\\n                   (\\\"bob\\\" 3000)   (\\\"alice\\\" 20000) (\\\"dave\\\" 1500) (\\\"carol\\\" 15050) (\\\"bob\\\" 41075)))\\n\\n(let ((totals (make-hash-table :test 'equal)) (grand 0))\\n  (dolist (o *orders*)\\n    (incf (gethash (first o) totals 0) (second o))\\n    (incf grand (second o)))\\n  (let ((top \\\"\\\") (topv 0))\\n    (maphash (lambda (k v) (when (> v topv) (setf top k topv v))) totals)\\n    (format t \\\"top=~a total=~a grand=~a~%\\\" top topv grand)\\n    (if (and (string= top \\\"bob\\\") (= topv 69075) (= grand 175199))\\n        (format t \\\"OK~%\\\")\\n        (progn (format t \\\"FAIL~%\\\") (sb-ext:exit :code 1)))))\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Lua \u2014 top-customer aggregation (tables) (ID=20)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 20,\n  \"source_code\": \"\\nlocal orders = {\\n    {\\\"alice\\\",12050},{\\\"bob\\\",25000},{\\\"alice\\\",7525},{\\\"carol\\\",49999},\\n    {\\\"bob\\\",3000},{\\\"alice\\\",20000},{\\\"dave\\\",1500},{\\\"carol\\\",15050},{\\\"bob\\\",41075}\\n}\\nlocal totals = {}\\nlocal grand  = 0\\nfor _, o in ipairs(orders) do\\n    totals[o[1]] = (totals[o[1]] or 0) + o[2]\\n    grand        = grand + o[2]\\nend\\nlocal top, topv = \\\"\\\", 0\\nfor k, v in pairs(totals) do if v > topv then top, topv = k, v end end\\nprint(string.format(\\\"top=%s total=%d grand=%d\\\", top, topv, grand))\\nif top == \\\"bob\\\" and topv == 69075 and grand == 175199 then\\n    print(\\\"OK\\\")\\nelse\\n    print(\\\"FAIL\\\"); os.exit(1)\\nend\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Nim \u2014 top-customer aggregation (CountTable) (ID=21)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 21,\n  \"source_code\": \"\\nimport strformat, strutils, tables\\n\\nlet orders = @[\\n    (\\\"alice\\\", 12050), (\\\"bob\\\", 25000), (\\\"alice\\\", 7525), (\\\"carol\\\", 49999),\\n    (\\\"bob\\\", 3000),    (\\\"alice\\\", 20000), (\\\"dave\\\", 1500), (\\\"carol\\\", 15050), (\\\"bob\\\", 41075)\\n]\\nvar totals = initCountTable[string]()\\nvar grand  = 0\\nfor (c, a) in orders:\\n    totals.inc(c, a)\\n    grand += a\\nvar top = \\\"\\\"\\nvar topv = 0\\nfor k, v in totals.pairs:\\n    if v > topv: top = k; topv = v\\n\\necho &\\\"top={top} total={topv} grand={grand}\\\"\\nif top == \\\"bob\\\" and topv == 69075 and grand == 175199:\\n    echo \\\"OK\\\"\\nelse:\\n    echo \\\"FAIL\\\"\\n    quit(1)\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Objective-C \u2014 Stats class with NSMutableArray + fast enumeration (ID=22)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 22,\n  \"source_code\": \"\\n// Complex Objective-C test: defines a Stats class that wraps NSMutableArray,\\n// implements sum/mean/min/max via fast enumeration over NSNumber, exercises\\n// classic alloc/release memory management, and self-checks the results.\\n// Uses printf (not NSLog) so the output has no timestamp prefix.\\n\\n#import <Foundation/Foundation.h>\\n#include <stdio.h>\\n#include <stdlib.h>\\n\\n@interface Stats : NSObject\\n{\\n    NSMutableArray *_values;\\n}\\n- (id)init;\\n- (void)add:(double)v;\\n- (NSUInteger)count;\\n- (double)sum;\\n- (double)mean;\\n- (double)min;\\n- (double)max;\\n@end\\n\\n@implementation Stats\\n- (id)init {\\n    if ((self = [super init])) {\\n        _values = [[NSMutableArray alloc] init];\\n    }\\n    return self;\\n}\\n- (void)dealloc {\\n    [_values release];\\n    [super dealloc];\\n}\\n- (void)add:(double)v {\\n    [_values addObject:[NSNumber numberWithDouble:v]];\\n}\\n- (NSUInteger)count { return [_values count]; }\\n- (double)sum {\\n    double s = 0;\\n    for (NSNumber *n in _values) s += [n doubleValue];\\n    return s;\\n}\\n- (double)mean {\\n    return [_values count] == 0 ? 0.0 : [self sum] / (double)[_values count];\\n}\\n- (double)min {\\n    double m = [[_values objectAtIndex:0] doubleValue];\\n    for (NSNumber *n in _values) {\\n        double v = [n doubleValue];\\n        if (v < m) m = v;\\n    }\\n    return m;\\n}\\n- (double)max {\\n    double m = [[_values objectAtIndex:0] doubleValue];\\n    for (NSNumber *n in _values) {\\n        double v = [n doubleValue];\\n        if (v > m) m = v;\\n    }\\n    return m;\\n}\\n@end\\n\\n// Local |x-y| < eps helper so we don't need to link libm for fabs().\\nstatic int near(double a, double b) {\\n    double d = a - b;\\n    if (d < 0) d = -d;\\n    return d < 0.0001;\\n}\\n\\nint main() {\\n    Stats *s = [[Stats alloc] init];\\n\\n    double inputs[] = {12.5, 7.0, 9.5, 22.0, 4.5, 18.0, 30.5, 15.0};\\n    int n = (int)(sizeof(inputs) / sizeof(inputs[0]));\\n    for (int i = 0; i < n; i++) {\\n        [s add:inputs[i]];\\n    }\\n\\n    printf(\\\"count=%lu sum=%.2f mean=%.4f min=%.2f max=%.2f\\\\n\\\",\\n           (unsigned long)[s count], [s sum], [s mean], [s min], [s max]);\\n\\n    if (!near([s sum],  119.0))   { printf(\\\"FAIL: sum\\\\n\\\");  [s release]; return 1; }\\n    if (!near([s mean],  14.875)) { printf(\\\"FAIL: mean\\\\n\\\"); [s release]; return 1; }\\n    if (!near([s min],    4.5))   { printf(\\\"FAIL: min\\\\n\\\");  [s release]; return 1; }\\n    if (!near([s max],   30.5))   { printf(\\\"FAIL: max\\\\n\\\");  [s release]; return 1; }\\n\\n    printf(\\\"OK\\\\n\\\");\\n    [s release];\\n    return 0;\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] OCaml \u2014 top-customer aggregation (Hashtbl) (ID=23)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 23,\n  \"source_code\": \"\\nlet orders = [\\n    (\\\"alice\\\", 12050); (\\\"bob\\\", 25000); (\\\"alice\\\", 7525); (\\\"carol\\\", 49999);\\n    (\\\"bob\\\", 3000);    (\\\"alice\\\", 20000); (\\\"dave\\\", 1500); (\\\"carol\\\", 15050); (\\\"bob\\\", 41075)\\n]\\n\\nlet () =\\n    let totals = Hashtbl.create 8 in\\n    let grand  = ref 0 in\\n    List.iter (fun (c, a) ->\\n        let cur = try Hashtbl.find totals c with Not_found -> 0 in\\n        Hashtbl.replace totals c (cur + a);\\n        grand := !grand + a\\n    ) orders;\\n    let top = ref \\\"\\\" and topv = ref 0 in\\n    Hashtbl.iter (fun k v -> if v > !topv then (top := k; topv := v)) totals;\\n    Printf.printf \\\"top=%s total=%d grand=%d\\\\n\\\" !top !topv !grand;\\n    if !top = \\\"bob\\\" && !topv = 69075 && !grand = 175199\\n    then print_endline \\\"OK\\\"\\n    else (print_endline \\\"FAIL\\\"; exit 1)\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Pascal \u2014 top-customer aggregation (ID=24)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 24,\n  \"source_code\": \"\\nprogram TopCust;\\n{$mode objfpc}\\ntype\\n    // FPC's default `integer` is 16-bit (-32768..32767), too small for 49999.\\n    // Use `longint` (32-bit) for amounts and accumulators.\\n    TRec = record c: string[8]; a: longint; end;\\nvar\\n    orders: array[1..9] of TRec = (\\n        (c:'alice'; a:12050),(c:'bob'; a:25000),(c:'alice'; a:7525),(c:'carol'; a:49999),\\n        (c:'bob'; a:3000),  (c:'alice'; a:20000),(c:'dave'; a:1500), (c:'carol'; a:15050),(c:'bob'; a:41075)\\n    );\\n    names: array[1..8] of string[8];\\n    totals: array[1..8] of longint;\\n    nn, i, j: integer;\\n    grand, topv: longint;\\n    top: string[8];\\n    found: boolean;\\nbegin\\n    nn := 0; grand := 0; topv := 0; top := '';\\n    for i := 1 to 8 do totals[i] := 0;\\n\\n    for i := 1 to 9 do begin\\n        grand := grand + orders[i].a;\\n        found := false;\\n        for j := 1 to nn do\\n            if names[j] = orders[i].c then begin\\n                totals[j] := totals[j] + orders[i].a;\\n                found := true; break;\\n            end;\\n        if not found then begin\\n            nn := nn + 1;\\n            names[nn] := orders[i].c;\\n            totals[nn] := orders[i].a;\\n        end;\\n    end;\\n\\n    for i := 1 to nn do\\n        if totals[i] > topv then begin topv := totals[i]; top := names[i]; end;\\n\\n    writeln('top=', top, ' total=', topv, ' grand=', grand);\\n    if (top = 'bob') and (topv = 69075) and (grand = 175199) then\\n        writeln('OK')\\n    else begin\\n        writeln('FAIL'); halt(1);\\n    end;\\nend.\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Perl \u2014 top-customer aggregation (hash) (ID=25)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 25,\n  \"source_code\": \"\\nuse strict;\\nuse warnings;\\nmy @orders = (\\n    [\\\"alice\\\",12050],[\\\"bob\\\",25000],[\\\"alice\\\",7525],[\\\"carol\\\",49999],\\n    [\\\"bob\\\",3000],   [\\\"alice\\\",20000],[\\\"dave\\\",1500],[\\\"carol\\\",15050],[\\\"bob\\\",41075]\\n);\\nmy (%totals, $grand);\\nfor my $o (@orders) { $totals{$o->[0]} += $o->[1]; $grand += $o->[1]; }\\nmy ($top, $topv) = (\\\"\\\", 0);\\nwhile (my ($k, $v) = each %totals) { if ($v > $topv) { $top = $k; $topv = $v } }\\nprintf \\\"top=%s total=%d grand=%d\\\\n\\\", $top, $topv, $grand;\\nif ($top eq \\\"bob\\\" && $topv == 69075 && $grand == 175199) {\\n    print \\\"OK\\\\n\\\";\\n} else {\\n    print \\\"FAIL\\\\n\\\"; exit 1;\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] PHP \u2014 top-customer aggregation (array) (ID=26)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 26,\n  \"source_code\": \"\\n<?php\\n$orders = [\\n    [\\\"alice\\\",12050],[\\\"bob\\\",25000],[\\\"alice\\\",7525],[\\\"carol\\\",49999],\\n    [\\\"bob\\\",3000],   [\\\"alice\\\",20000],[\\\"dave\\\",1500],[\\\"carol\\\",15050],[\\\"bob\\\",41075]\\n];\\n$totals = []; $grand = 0;\\nforeach ($orders as $o) {\\n    $totals[$o[0]] = ($totals[$o[0]] ?? 0) + $o[1];\\n    $grand        += $o[1];\\n}\\n$top = array_keys($totals, max($totals))[0];\\n$topv = $totals[$top];\\necho \\\"top=$top total=$topv grand=$grand\\\\n\\\";\\nif ($top === \\\"bob\\\" && $topv === 69075 && $grand === 175199) {\\n    echo \\\"OK\\\\n\\\";\\n} else {\\n    echo \\\"FAIL\\\\n\\\"; exit(1);\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Prolog \u2014 top-customer aggregation (setof+sort) (ID=27)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 27,\n  \"source_code\": \"\\n:- initialization(main).\\norder(alice, 12050).\\norder(bob,   25000).\\norder(alice,  7525).\\norder(carol, 49999).\\norder(bob,    3000).\\norder(alice, 20000).\\norder(dave,   1500).\\norder(carol, 15050).\\norder(bob,   41075).\\n\\ncustomer_total(C, T) :- findall(A, order(C, A), L), sum_list(L, T).\\n\\nmain :-\\n    setof(C, A^order(C, A), Cs),\\n    maplist([C, C-T]>>customer_total(C, T), Cs, Pairs),\\n    pairs_values(Pairs, Vs), sum_list(Vs, Grand),\\n    sort(2, @>=, Pairs, Sorted), Sorted = [Top-TopV|_],\\n    format(\\\"top=~w total=~w grand=~w~n\\\", [Top, TopV, Grand]),\\n    ( Top == bob, TopV =:= 69075, Grand =:= 175199\\n      -> writeln('OK')\\n      ;  writeln('FAIL'), halt(1)\\n    ).\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Python 2 \u2014 top-customer aggregation (dict) (ID=28)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 28,\n  \"source_code\": \"\\norders = [\\n    (\\\"alice\\\",12050),(\\\"bob\\\",25000),(\\\"alice\\\",7525),(\\\"carol\\\",49999),\\n    (\\\"bob\\\",3000),   (\\\"alice\\\",20000),(\\\"dave\\\",1500),(\\\"carol\\\",15050),(\\\"bob\\\",41075)\\n]\\ntotals = {}\\ngrand  = 0\\nfor c, a in orders:\\n    totals[c] = totals.get(c, 0) + a\\n    grand    += a\\ntop, topv = max(totals.items(), key=lambda kv: kv[1])\\nprint \\\"top=%s total=%d grand=%d\\\" % (top, topv, grand)\\nif top == \\\"bob\\\" and topv == 69075 and grand == 175199:\\n    print \\\"OK\\\"\\nelse:\\n    print \\\"FAIL\\\"; import sys; sys.exit(1)\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Python 3 \u2014 top-customer aggregation (Counter) (ID=29)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 29,\n  \"source_code\": \"\\nfrom collections import Counter\\norders = [\\n    (\\\"alice\\\",12050),(\\\"bob\\\",25000),(\\\"alice\\\",7525),(\\\"carol\\\",49999),\\n    (\\\"bob\\\",3000),   (\\\"alice\\\",20000),(\\\"dave\\\",1500),(\\\"carol\\\",15050),(\\\"bob\\\",41075)\\n]\\ntotals = Counter()\\ngrand  = 0\\nfor c, a in orders:\\n    totals[c] += a\\n    grand     += a\\ntop, topv = totals.most_common(1)[0]\\nprint(f\\\"top={top} total={topv} grand={grand}\\\")\\nif top == \\\"bob\\\" and topv == 69075 and grand == 175199:\\n    print(\\\"OK\\\")\\nelse:\\n    print(\\\"FAIL\\\"); raise SystemExit(1)\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] R \u2014 top-customer aggregation (tapply) (ID=30)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 30,\n  \"source_code\": \"\\ncust <- c(\\\"alice\\\",\\\"bob\\\",\\\"alice\\\",\\\"carol\\\",\\\"bob\\\",\\\"alice\\\",\\\"dave\\\",\\\"carol\\\",\\\"bob\\\")\\namt  <- c(12050, 25000, 7525, 49999, 3000, 20000, 1500, 15050, 41075)\\ntotals <- tapply(amt, cust, sum)\\ntop    <- names(which.max(totals))\\ntopv   <- as.integer(totals[top])\\ngrand  <- sum(amt)\\ncat(sprintf(\\\"top=%s total=%d grand=%d\\\\n\\\", top, topv, grand))\\nif (top == \\\"bob\\\" && topv == 69075 && grand == 175199) {\\n    cat(\\\"OK\\\\n\\\")\\n} else {\\n    cat(\\\"FAIL\\\\n\\\"); quit(status = 1)\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Ruby \u2014 top-customer aggregation (Hash#max_by) (ID=31)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 31,\n  \"source_code\": \"\\norders = [\\n    [\\\"alice\\\",12050],[\\\"bob\\\",25000],[\\\"alice\\\",7525],[\\\"carol\\\",49999],\\n    [\\\"bob\\\",3000],   [\\\"alice\\\",20000],[\\\"dave\\\",1500],[\\\"carol\\\",15050],[\\\"bob\\\",41075]\\n]\\ntotals = Hash.new(0)\\ngrand  = 0\\norders.each { |c, a| totals[c] += a; grand += a }\\ntop, topv = totals.max_by { |_, v| v }\\nputs \\\"top=#{top} total=#{topv} grand=#{grand}\\\"\\nif top == \\\"bob\\\" && topv == 69075 && grand == 175199\\n    puts \\\"OK\\\"\\nelse\\n    puts \\\"FAIL\\\"; exit 1\\nend\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Rust \u2014 top-customer aggregation (HashMap) (ID=32)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 32,\n  \"source_code\": \"\\nuse std::collections::HashMap;\\nuse std::process;\\n\\nfn main() {\\n    let orders = [\\n        (\\\"alice\\\", 12050), (\\\"bob\\\", 25000), (\\\"alice\\\", 7525), (\\\"carol\\\", 49999),\\n        (\\\"bob\\\", 3000),    (\\\"alice\\\", 20000), (\\\"dave\\\", 1500), (\\\"carol\\\", 15050), (\\\"bob\\\", 41075),\\n    ];\\n    let mut totals: HashMap<&str, i32> = HashMap::new();\\n    let mut grand = 0;\\n    for (c, a) in orders.iter() {\\n        *totals.entry(c).or_insert(0) += a;\\n        grand += a;\\n    }\\n    let (top, topv) = totals.iter().max_by_key(|kv| kv.1).unwrap();\\n    println!(\\\"top={} total={} grand={}\\\", top, topv, grand);\\n    if *top != \\\"bob\\\" || *topv != 69075 || grand != 175199 {\\n        println!(\\\"FAIL\\\");\\n        process::exit(1);\\n    }\\n    println!(\\\"OK\\\");\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Scala \u2014 top-customer aggregation (groupMap) (ID=33)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 33,\n  \"source_code\": \"\\n// Modern Scala 3 entry-point syntax. The worker runs Scala in script mode\\n// via `scala <file>.scala`, which detects `@main def NAME` automatically \\u2014\\n// no need for an `object Main` wrapper.\\n@main def run(): Unit =\\n  val orders = List(\\n    (\\\"alice\\\",12050),(\\\"bob\\\",25000),(\\\"alice\\\",7525),(\\\"carol\\\",49999),\\n    (\\\"bob\\\",3000),   (\\\"alice\\\",20000),(\\\"dave\\\",1500),(\\\"carol\\\",15050),(\\\"bob\\\",41075))\\n  val totals = orders.groupMapReduce(_._1)(_._2)(_ + _)\\n  val (top, topv) = totals.maxBy(_._2)\\n  val grand = totals.values.sum\\n  println(s\\\"top=$top total=$topv grand=$grand\\\")\\n  if top == \\\"bob\\\" && topv == 69075 && grand == 175199 then println(\\\"OK\\\")\\n  else { println(\\\"FAIL\\\"); sys.exit(1) }\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] Swift \u2014 top-customer aggregation (Dictionary) (ID=34)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 34,\n  \"source_code\": \"\\nlet orders: [(String, Int)] = [\\n    (\\\"alice\\\",12050),(\\\"bob\\\",25000),(\\\"alice\\\",7525),(\\\"carol\\\",49999),\\n    (\\\"bob\\\",3000),   (\\\"alice\\\",20000),(\\\"dave\\\",1500),(\\\"carol\\\",15050),(\\\"bob\\\",41075)\\n]\\nvar totals: [String: Int] = [:]\\nvar grand = 0\\nfor (c, a) in orders {\\n    totals[c, default: 0] += a\\n    grand += a\\n}\\nlet (top, topv) = totals.max(by: { $0.value < $1.value })!\\nprint(\\\"top=\\\\(top) total=\\\\(topv) grand=\\\\(grand)\\\")\\nif top == \\\"bob\\\" && topv == 69075 && grand == 175199 {\\n    print(\\\"OK\\\")\\n} else {\\n    print(\\\"FAIL\\\"); exit(1)\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] TypeScript \u2014 top-customer aggregation (typed) (ID=35)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 35,\n  \"source_code\": \"\\ntype Order = [string, number];\\nconst orders: Order[] = [\\n    [\\\"alice\\\",12050],[\\\"bob\\\",25000],[\\\"alice\\\",7525],[\\\"carol\\\",49999],\\n    [\\\"bob\\\",3000],   [\\\"alice\\\",20000],[\\\"dave\\\",1500],[\\\"carol\\\",15050],[\\\"bob\\\",41075]\\n];\\nconst totals: Record<string, number> = {};\\nlet grand = 0;\\nfor (const [c, a] of orders) {\\n    totals[c] = (totals[c] ?? 0) + a;\\n    grand += a;\\n}\\nconst [top, topv] = Object.entries(totals).reduce((b, e) => e[1] > b[1] ? e : b);\\nconsole.log(`top=${top} total=${topv} grand=${grand}`);\\nif (top === \\\"bob\\\" && topv === 69075 && grand === 175199) {\\n    console.log(\\\"OK\\\");\\n} else {\\n    console.log(\\\"FAIL\\\"); process.exit(1);\\n}\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] VB.NET \u2014 top-customer aggregation (LINQ) (ID=36)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 36,\n  \"source_code\": \"\\n' Mono's vbnc (last updated ~2014) doesn't understand C# tuple syntax,\\n' string interpolation, or modern LINQ extension methods. Stick to classic\\n' VB.NET: parallel arrays + Dictionary(Of ...) + For Each.\\nImports System\\nImports System.Collections.Generic\\n\\nModule Main\\n    Sub Main()\\n        Dim custs() As String  = {\\\"alice\\\",\\\"bob\\\",\\\"alice\\\",\\\"carol\\\",\\\"bob\\\",\\\"alice\\\",\\\"dave\\\",\\\"carol\\\",\\\"bob\\\"}\\n        Dim amts()  As Integer = {12050, 25000, 7525, 49999, 3000, 20000, 1500, 15050, 41075}\\n\\n        Dim totals As New Dictionary(Of String, Integer)\\n        Dim grand As Integer = 0\\n        Dim i As Integer\\n        For i = 0 To custs.Length - 1\\n            If totals.ContainsKey(custs(i)) Then\\n                totals(custs(i)) = totals(custs(i)) + amts(i)\\n            Else\\n                totals(custs(i)) = amts(i)\\n            End If\\n            grand = grand + amts(i)\\n        Next\\n\\n        Dim top As String = \\\"\\\"\\n        Dim topv As Integer = 0\\n        Dim kv As KeyValuePair(Of String, Integer)\\n        For Each kv In totals\\n            If kv.Value > topv Then\\n                top  = kv.Key\\n                topv = kv.Value\\n            End If\\n        Next\\n\\n        Console.WriteLine(\\\"top=\\\" & top & \\\" total=\\\" & topv & \\\" grand=\\\" & grand)\\n        If top = \\\"bob\\\" AndAlso topv = 69075 AndAlso grand = 175199 Then\\n            Console.WriteLine(\\\"OK\\\")\\n        Else\\n            Console.WriteLine(\\\"FAIL\\\")\\n            Environment.Exit(1)\\n        End If\\n    End Sub\\nEnd Module\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] SQLite \u2014 top-customer aggregation (CTE) (ID=37)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 37,\n  \"source_code\": \"\\nCREATE TABLE orders (customer TEXT, amount INTEGER);\\nINSERT INTO orders VALUES\\n    ('alice',12050),('bob',25000),('alice',7525),('carol',49999),\\n    ('bob',3000),  ('alice',20000),('dave',1500),('carol',15050),('bob',41075);\\n\\nWITH per_cust AS (\\n    SELECT customer, SUM(amount) AS total FROM orders GROUP BY customer\\n),\\nagg AS (\\n    SELECT customer, total,\\n           (SELECT SUM(amount) FROM orders) AS grand\\n    FROM per_cust ORDER BY total DESC LIMIT 1\\n)\\nSELECT\\n    'top=' || customer ||\\n    ' total=' || total ||\\n    ' grand=' || grand AS line\\nFROM agg\\nUNION ALL\\nSELECT CASE WHEN customer='bob' AND total=69075 AND grand=175199\\n            THEN 'OK' ELSE 'FAIL' END\\nFROM agg;\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] MySQL \u2014 top-customer aggregation (CTE) (ID=38)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 38,\n  \"source_code\": \"\\nCREATE DATABASE IF NOT EXISTS test;\\nUSE test;\\nDROP TABLE IF EXISTS orders;\\nCREATE TABLE orders (customer VARCHAR(16), amount INT);\\nINSERT INTO orders VALUES\\n    ('alice',12050),('bob',25000),('alice',7525),('carol',49999),\\n    ('bob',3000),  ('alice',20000),('dave',1500),('carol',15050),('bob',41075);\\n\\nWITH per_cust AS (\\n    SELECT customer, SUM(amount) AS total FROM orders GROUP BY customer\\n),\\nagg AS (\\n    SELECT customer, total,\\n           (SELECT SUM(amount) FROM orders) AS grand\\n    FROM per_cust ORDER BY total DESC LIMIT 1\\n)\\nSELECT CONCAT('top=', customer, ' total=', total, ' grand=', grand) AS line FROM agg\\nUNION ALL\\nSELECT IF(customer='bob' AND total=69075 AND grand=175199, 'OK', 'FAIL') FROM agg;\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] PostgreSQL \u2014 top-customer aggregation (CTE) (ID=39)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 39,\n  \"source_code\": \"\\nCREATE TABLE orders (customer TEXT, amount INT);\\nINSERT INTO orders VALUES\\n    ('alice',12050),('bob',25000),('alice',7525),('carol',49999),\\n    ('bob',3000),  ('alice',20000),('dave',1500),('carol',15050),('bob',41075);\\n\\nWITH per_cust AS (\\n    SELECT customer, SUM(amount) AS total FROM orders GROUP BY customer\\n),\\nagg AS (\\n    SELECT customer, total,\\n           (SELECT SUM(amount) FROM orders) AS grand\\n    FROM per_cust ORDER BY total DESC LIMIT 1\\n)\\nSELECT 'top=' || customer || ' total=' || total || ' grand=' || grand AS line FROM agg\\nUNION ALL\\nSELECT CASE WHEN customer='bob' AND total=69075 AND grand=175199\\n            THEN 'OK' ELSE 'FAIL' END FROM agg;\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "[PASS] MongoDB \u2014 top-3 customers aggregation (ID=40)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/submissions?wait=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "submissions"
+          ],
+          "query": [
+            {
+              "key": "wait",
+              "value": "true"
+            }
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"language_id\": 40,\n  \"source_code\": \"// Complex MongoDB problem (mongosh --nodb):\\n// Given a synthetic orders dataset, compute the top-3 customers by total spend\\n// in 2025, exclude refunds, and emit a CSV row per customer.\\n\\nconst orders = [\\n  { _id: ObjectId(), customer: \\\"alice\\\", amount: 120.50, refunded: false, date: ISODate(\\\"2025-01-12\\\") },\\n  { _id: ObjectId(), customer: \\\"bob\\\",   amount: 250.00, refunded: false, date: ISODate(\\\"2025-02-03\\\") },\\n  { _id: ObjectId(), customer: \\\"alice\\\", amount:  75.25, refunded: true,  date: ISODate(\\\"2025-02-15\\\") },\\n  { _id: ObjectId(), customer: \\\"carol\\\", amount: 499.99, refunded: false, date: ISODate(\\\"2025-03-04\\\") },\\n  { _id: ObjectId(), customer: \\\"bob\\\",   amount:  30.00, refunded: false, date: ISODate(\\\"2025-03-22\\\") },\\n  { _id: ObjectId(), customer: \\\"alice\\\", amount: 200.00, refunded: false, date: ISODate(\\\"2025-04-09\\\") },\\n  { _id: ObjectId(), customer: \\\"dave\\\",  amount:  15.00, refunded: false, date: ISODate(\\\"2025-04-11\\\") },\\n  { _id: ObjectId(), customer: \\\"carol\\\", amount: 150.50, refunded: false, date: ISODate(\\\"2025-05-01\\\") },\\n  { _id: ObjectId(), customer: \\\"bob\\\",   amount: 410.75, refunded: false, date: ISODate(\\\"2025-05-18\\\") },\\n  { _id: ObjectId(), customer: \\\"alice\\\", amount:  60.00, refunded: false, date: ISODate(\\\"2024-12-31\\\") }, // excluded by year\\n  { _id: ObjectId(), customer: \\\"eve\\\",   amount: 999.00, refunded: true,  date: ISODate(\\\"2025-06-02\\\") }, // refunded\\n];\\n\\nconst startOfYear = ISODate(\\\"2025-01-01\\\");\\nconst endOfYear   = ISODate(\\\"2026-01-01\\\");\\n\\nconst stage1 = orders.filter(o =>\\n  !o.refunded && o.date >= startOfYear && o.date < endOfYear\\n);\\n\\nconst groups = {};\\nfor (const o of stage1) {\\n  if (!groups[o.customer]) groups[o.customer] = { total: 0, count: 0 };\\n  groups[o.customer].total += o.amount;\\n  groups[o.customer].count += 1;\\n}\\n\\nconst ranked = Object.entries(groups)\\n  .map(([customer, v]) => ({ customer, total: v.total, count: v.count }))\\n  .sort((a, b) => b.total - a.total)\\n  .slice(0, 3);\\n\\nprint(\\\"rank,customer,orders,total\\\");\\nranked.forEach((r, i) => {\\n  print(`${i + 1},${r.customer},${r.count},${r.total.toFixed(2)}`);\\n});\\n\\nif (ranked.length !== 3) {\\n  print(\\\"ASSERTION_FAILED: expected 3 rows\\\");\\n  quit(1);\\n}\\nif (ranked[0].customer !== \\\"bob\\\" || ranked[0].total.toFixed(2) !== \\\"690.75\\\") {\\n  print(`ASSERTION_FAILED: bob expected 690.75, got ${ranked[0].customer}=${ranked[0].total}`);\\n  quit(1);\\n}\\nif (ranked[1].customer !== \\\"carol\\\" || ranked[1].total.toFixed(2) !== \\\"650.49\\\") {\\n  print(`ASSERTION_FAILED: carol expected 650.49, got ${ranked[1].customer}=${ranked[1].total}`);\\n  quit(1);\\n}\\nif (ranked[2].customer !== \\\"alice\\\" || ranked[2].total.toFixed(2) !== \\\"320.50\\\") {\\n  print(`ASSERTION_FAILED: alice expected 320.50, got ${ranked[2].customer}=${ranked[2].total}`);\\n  quit(1);\\n}\\n\\nprint(\\\"OK\\\");\\n\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    }
+  ]
+}
