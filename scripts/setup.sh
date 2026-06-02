@@ -11,6 +11,16 @@
 # Options:
 #   --skip-images      Skip building/pulling runtime images
 #   --skip-migrations  Skip running scripts/migrate.sh after startup
+#   --pull-only        Deploy mode: pull pre-built images from REGISTRY instead
+#                      of compiling anything. Skips the Go toolchain check and
+#                      the api/worker docker build, and layers in the
+#                      single-node override (docker-compose.single.yml).
+#                      Requires REGISTRY to be set.
+#
+# Environment:
+#   REGISTRY           Registry prefix for --pull-only (e.g. ECR URL)
+#   LANGUAGES          Optional space-separated language allowlist (passed
+#                      through to pull-images.sh)
 # =============================================================================
 
 set -euo pipefail
@@ -27,15 +37,23 @@ heading() { echo -e "\n${BLUE}=== $* ===${NC}\n" | tee -a "${LOG_FILE}"; }
 
 SKIP_IMAGES=false
 SKIP_MIGRATIONS=false
+PULL_ONLY=false
 for arg in "$@"; do
     case "$arg" in
         --skip-images)     SKIP_IMAGES=true ;;
         --skip-migrations) SKIP_MIGRATIONS=true ;;
+        --pull-only)       PULL_ONLY=true ;;
         --help|-h)
-            sed -n '2,14p' "$0" | sed 's/^# \?//'
+            sed -n '2,24p' "$0" | sed 's/^# \?//'
             exit 0 ;;
     esac
 done
+
+# Compose files: base dev stack, plus the single-node override in deploy mode.
+COMPOSE_FILES=(-f docker-compose.yml)
+if [ "${PULL_ONLY}" = "true" ]; then
+    COMPOSE_FILES+=(-f docker-compose.single.yml)
+fi
 
 : > "${LOG_FILE}"
 heading "CodeRuntime Setup"
@@ -52,7 +70,12 @@ need_cmd() {
 }
 
 need_cmd docker
-need_cmd go
+if [ "${PULL_ONLY}" = "true" ]; then
+    [ -n "${REGISTRY:-}" ] || error "--pull-only requires REGISTRY to be set (e.g. <acct>.dkr.ecr.<region>.amazonaws.com)"
+    log "  pull-only mode: skipping Go toolchain check (no local builds)"
+else
+    need_cmd go
+fi
 
 # docker compose v2 or legacy docker-compose
 if docker compose version &>/dev/null 2>&1; then
@@ -66,19 +89,26 @@ log "  compose: $(${DC} version 2>&1 | head -1)"
 
 docker info &>/dev/null || error "Docker daemon is not running. Start Docker Desktop and retry."
 
-# Go 1.24+
-GO_VER=$(go version | awk '{print $3}' | sed 's/go//')
-awk -v v="${GO_VER}" -v r="1.24" 'BEGIN{
-    split(v,a,"."); split(r,b,".")
-    for(i=1;i<=2;i++) if(a[i]+0 < b[i]+0) exit 1
-}' || error "Go 1.24+ required (found ${GO_VER})"
+# Go 1.24+ (only needed when building locally)
+if [ "${PULL_ONLY}" = "false" ]; then
+    GO_VER=$(go version | awk '{print $3}' | sed 's/go//')
+    awk -v v="${GO_VER}" -v r="1.24" 'BEGIN{
+        split(v,a,"."); split(r,b,".")
+        for(i=1;i<=2;i++) if(a[i]+0 < b[i]+0) exit 1
+    }' || error "Go 1.24+ required (found ${GO_VER})"
+fi
 
 log "All prerequisites satisfied."
 
 # ── 2. Build/pull runtime images ──────────────────────────────────────────────
 if [ "${SKIP_IMAGES}" = "false" ]; then
-    heading "Building Runtime Images"
-    bash "${SCRIPT_DIR}/pull-images.sh" 2>&1 | tee -a "${LOG_FILE}"
+    if [ "${PULL_ONLY}" = "true" ]; then
+        heading "Pulling Runtime Images"
+        bash "${SCRIPT_DIR}/pull-images.sh" --pull-only 2>&1 | tee -a "${LOG_FILE}"
+    else
+        heading "Building Runtime Images"
+        bash "${SCRIPT_DIR}/pull-images.sh" 2>&1 | tee -a "${LOG_FILE}"
+    fi
 else
     warn "Skipping runtime image build (--skip-images)"
 fi
@@ -94,13 +124,18 @@ heading "Starting Services"
 cd "${PROJECT_ROOT}"
 
 log "Pulling infrastructure images..."
-${DC} pull postgres redis nats 2>&1 | tee -a "${LOG_FILE}"
+${DC} "${COMPOSE_FILES[@]}" pull postgres redis nats 2>&1 | tee -a "${LOG_FILE}"
 
-log "Building API and Worker images..."
-${DC} build --parallel api worker 2>&1 | tee -a "${LOG_FILE}"
+if [ "${PULL_ONLY}" = "true" ]; then
+    log "Pulling API, Worker and Queue Manager images from ${REGISTRY}..."
+    ${DC} "${COMPOSE_FILES[@]}" pull api worker queue-manager 2>&1 | tee -a "${LOG_FILE}"
+else
+    log "Building API and Worker images..."
+    ${DC} "${COMPOSE_FILES[@]}" build --parallel api worker 2>&1 | tee -a "${LOG_FILE}"
+fi
 
 log "Starting all services..."
-${DC} up -d 2>&1 | tee -a "${LOG_FILE}"
+${DC} "${COMPOSE_FILES[@]}" up -d 2>&1 | tee -a "${LOG_FILE}"
 
 # ── 5. Wait for services to be healthy ────────────────────────────────────────
 heading "Waiting for Services"
@@ -109,7 +144,7 @@ wait_healthy() {
     local svc="$1" max="${2:-120}" elapsed=0
     log "Waiting for ${svc}..."
     while [ "${elapsed}" -lt "${max}" ]; do
-        status=$(${DC} ps "${svc}" --format json 2>/dev/null \
+        status=$(${DC} "${COMPOSE_FILES[@]}" ps "${svc}" --format json 2>/dev/null \
             | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('Health',''))" \
             2>/dev/null || echo "")
         if [ "${status}" = "healthy" ]; then

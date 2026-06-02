@@ -6,11 +6,20 @@
 # then pulls all official public images used by language.go.
 #
 # Usage:
-#   bash scripts/pull-images.sh [--push] [--parallel N]
+#   bash scripts/pull-images.sh [--push] [--pull-only] [--parallel N]
 #
 # Options:
 #   --push        Push built images to a registry (set REGISTRY env var)
-#   --parallel N  Number of parallel docker build jobs (default: 4)
+#   --pull-only   Skip building; pull pre-built images from REGISTRY instead.
+#                 Use this on production/deploy hosts so they never compile
+#                 toolchains. Requires REGISTRY to be set.
+#   --parallel N  Number of parallel docker build/pull jobs (default: 4)
+#
+# Environment:
+#   REGISTRY      Registry prefix, e.g. <acct>.dkr.ecr.<region>.amazonaws.com
+#   LANGUAGES     Space-separated allowlist of languages to build/pull.
+#                 When unset, all languages under runtime-images/ are processed.
+#                 Example: LANGUAGES="python nodejs golang java"
 # =============================================================================
 
 set -euo pipefail
@@ -21,14 +30,18 @@ RUNTIME_IMAGES_DIR="${PROJECT_ROOT}/runtime-images"
 
 REGISTRY="${REGISTRY:-}"
 PUSH_IMAGES=false
+PULL_ONLY=false
 PARALLEL="${PARALLEL:-4}"
+# Optional space-separated allowlist of languages to process.
+LANGUAGES="${LANGUAGES:-}"
 
 for arg in "$@"; do
     case "$arg" in
         --push)         PUSH_IMAGES=true ;;
+        --pull-only)    PULL_ONLY=true ;;
         --parallel=*)   PARALLEL="${arg#--parallel=}" ;;
         --help|-h)
-            sed -n '2,12p' "$0" | sed 's/^# \?//'
+            sed -n '2,24p' "$0" | sed 's/^# \?//'
             exit 0 ;;
     esac
 done
@@ -81,30 +94,71 @@ build_one() {
     fi
 }
 
-# Collect all directories that have a Dockerfile
+# Pulls a pre-built image from REGISTRY and re-tags it as the local
+# code-runtime-<lang>:latest that the worker expects. Used by --pull-only so
+# deploy hosts download images instead of compiling toolchains.
+pull_one() {
+    local lang="$1"
+    local local_tag="code-runtime-${lang}:latest"
+    local remote_tag="${REGISTRY}/code-runtime-${lang}:latest"
+
+    _log "  Pulling ${remote_tag}"
+    if docker pull "${remote_tag}" > /tmp/pull_${lang}.log 2>&1; then
+        docker tag "${remote_tag}" "${local_tag}"
+        _log "  ${lang}: OK"
+    else
+        warn "  ${lang}: FAILED (see /tmp/pull_${lang}.log)"
+        return
+    fi
+}
+
+# --pull-only requires a registry to pull from.
+if [ "${PULL_ONLY}" = "true" ] && [ -z "${REGISTRY}" ]; then
+    error "--pull-only requires REGISTRY to be set (e.g. <acct>.dkr.ecr.<region>.amazonaws.com)"
+fi
+
+# Returns 0 if the language is allowed by the LANGUAGES allowlist (or no
+# allowlist is set), 1 otherwise.
+lang_allowed() {
+    [ -z "${LANGUAGES}" ] && return 0
+    [[ " ${LANGUAGES} " == *" $1 "* ]]
+}
+
+# Collect all directories that have a Dockerfile, filtered by the allowlist.
 LANGS=()
 for dir in "${RUNTIME_IMAGES_DIR}"/*/; do
     lang="$(basename "${dir}")"
-    if [ -f "${dir}Dockerfile" ]; then
+    if [ -f "${dir}Dockerfile" ] && lang_allowed "${lang}"; then
         LANGS+=("${lang}")
     fi
 done
 
-if [ ${#LANGS[@]} -eq 0 ]; then
-    warn "No Dockerfiles found under ${RUNTIME_IMAGES_DIR}"
+# Which worker function runs per language depends on the mode.
+if [ "${PULL_ONLY}" = "true" ]; then
+    WORK_FN="pull_one"; VERB="pull"
 else
-    _log "Found ${#LANGS[@]} custom images to build: ${LANGS[*]}"
+    WORK_FN="build_one"; VERB="build"
+fi
+
+if [ ${#LANGS[@]} -eq 0 ]; then
+    if [ -n "${LANGUAGES}" ]; then
+        warn "No matching Dockerfiles for LANGUAGES='${LANGUAGES}' under ${RUNTIME_IMAGES_DIR}"
+    else
+        warn "No Dockerfiles found under ${RUNTIME_IMAGES_DIR}"
+    fi
+else
+    _log "Found ${#LANGS[@]} custom images to ${VERB}: ${LANGS[*]}"
 
     if [ "${PARALLEL}" -gt 1 ] && command -v xargs &>/dev/null; then
         # Export functions and variables so each child shell spawned by xargs has them
-        export -f build_one _log warn error
+        export -f build_one pull_one _log warn error
         export GREEN YELLOW RED BLUE NC
         export RUNTIME_IMAGES_DIR REGISTRY PUSH_IMAGES
         printf '%s\n' "${LANGS[@]}" | \
-            xargs -P "${PARALLEL}" -I{} bash -c 'build_one "$@"' _ {}
+            xargs -P "${PARALLEL}" -I{} bash -c "${WORK_FN} \"\$@\"" _ {}
     else
         for lang in "${LANGS[@]}"; do
-            build_one "${lang}"
+            "${WORK_FN}" "${lang}"
         done
     fi
 fi
