@@ -82,6 +82,18 @@ rm -rf "${LOG_DIR}"; mkdir -p "${LOG_DIR}"
 cleanup() { rm -rf "${STATUS_DIR}"; }
 trap cleanup EXIT
 
+# On Ctrl+C / SIGTERM, stop in-flight child jobs (xargs + docker build clients)
+# before the EXIT trap removes the status dir, so we don't race a late record()
+# write or leak orphaned build output after the prompt returns.
+on_interrupt() {
+    trap '' INT TERM            # ignore repeated signals while shutting down
+    echo -e "\n${YELLOW}[images]${NC} Interrupted — stopping in-flight builds..." >&2
+    pkill -TERM -P $$ 2>/dev/null || true
+    wait 2>/dev/null || true
+    exit 130
+}
+trap on_interrupt INT TERM
+
 # ─── Preconditions ────────────────────────────────────────────────────────────
 command -v docker >/dev/null 2>&1 || error "'docker' not found in PATH."
 docker info >/dev/null 2>&1 \
@@ -126,7 +138,9 @@ retry() {
 }
 
 # record <lang> <status> — persist a job's outcome (ok | skip | fail:<reason>).
-record() { echo "$2" > "${STATUS_DIR}/$1.status"; }
+# Tolerates the status dir having been removed (e.g. by the cleanup trap during
+# an interrupt) so a late write never prints a "No such file or directory" error.
+record() { echo "$2" > "${STATUS_DIR}/$1.status" 2>/dev/null || true; }
 
 # build_one always returns 0; outcome is captured via record() so neither
 # `set -e` nor xargs aborts the run on an individual failure.
