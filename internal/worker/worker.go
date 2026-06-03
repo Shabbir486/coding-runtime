@@ -176,10 +176,19 @@ func (w *Worker) processJob(ctx context.Context, job *models.ExecutionJob) error
 	// ── 2. Resolve language ──────────────────────────────────────────────────
 	lang, err := w.runtime.GetLanguage(ctx, job.LanguageID)
 	if err != nil {
-		return w.failJob(ctx, token, models.StatusInternalError, fmt.Sprintf("language lookup: %v", err))
+		return w.failJob(ctx, token, models.StatusInternalError, fmt.Sprintf("language lookup: %v", err), "unknown")
 	}
 
 	// ── 3. Build execution request ───────────────────────────────────────────
+	langName := job.LanguageName
+	if langName == "" {
+		if lang != nil {
+			langName = lang.Name
+		} else {
+			langName = "unknown"
+		}
+	}
+
 	sub := jobToSubmission(job)
 	execReq := w.runtime.BuildExecutionRequest(sub, lang)
 
@@ -207,10 +216,10 @@ func (w *Worker) processJob(ctx context.Context, job *models.ExecutionJob) error
 		}
 		dbRes, dbErr := w.dbRuntime.Execute(ctx, dbReq)
 		if dbErr != nil && dbRes == nil {
-			return w.failJob(ctx, token, models.StatusInternalError, dbErr.Error())
+			return w.failJob(ctx, token, models.StatusInternalError, dbErr.Error(), langName)
 		}
 		if dbRes == nil {
-			return w.failJob(ctx, token, models.StatusInternalError, "nil db execution result")
+			return w.failJob(ctx, token, models.StatusInternalError, "nil db execution result", langName)
 		}
 		execResult = &sandbox.ExecutionResult{
 			Stdout:     dbRes.Stdout,
@@ -226,10 +235,10 @@ func (w *Worker) processJob(ctx context.Context, job *models.ExecutionJob) error
 	}
 
 	if execErr != nil && execResult == nil {
-		return w.failJob(ctx, token, models.StatusInternalError, execErr.Error())
+		return w.failJob(ctx, token, models.StatusInternalError, execErr.Error(), langName)
 	}
 	if execResult == nil {
-		return w.failJob(ctx, token, models.StatusInternalError, "nil execution result")
+		return w.failJob(ctx, token, models.StatusInternalError, "nil execution result", langName)
 	}
 
 	// ── 5. Map sandbox status to submission status ───────────────────────────
@@ -279,9 +288,17 @@ func (w *Worker) processJob(ctx context.Context, job *models.ExecutionJob) error
 	}
 
 	// ── 11. Record metrics ────────────────────────────────────────────────────
-	langIDStr := fmt.Sprintf("%d", job.LanguageID)
-	w.metrics.JobsConsumed.WithLabelValues(w.id, fmt.Sprintf("%d", statusID)).Inc()
-	w.metrics.JobDuration.WithLabelValues(w.id, langIDStr).Observe(time.Since(start).Seconds())
+	statusName := models.StatusDescriptions[statusID]
+	if statusName == "" {
+		statusName = fmt.Sprintf("%d", statusID)
+	}
+
+	w.metrics.JobsConsumed.WithLabelValues(w.id, statusName, langName).Inc()
+	w.metrics.JobDuration.WithLabelValues(w.id, langName).Observe(time.Since(start).Seconds())
+	if execResult != nil {
+		w.metrics.JobMemoryBytes.WithLabelValues(w.id, langName).Observe(float64(execResult.MemoryUsed))
+		w.metrics.JobCPUTime.WithLabelValues(w.id, langName).Observe(execResult.CPUTime)
+	}
 
 	w.logger.Info("job complete",
 		zap.String("token", token),
@@ -304,7 +321,7 @@ func (w *Worker) updateSubmissionStatus(ctx context.Context, token string, statu
 		}).Error
 }
 
-func (w *Worker) failJob(ctx context.Context, token string, statusID int, msg string) error {
+func (w *Worker) failJob(ctx context.Context, token string, statusID int, msg string, langName string) error {
 	w.logger.Error("job failed", zap.String("token", token), zap.Int("status_id", statusID), zap.String("msg", msg))
 	finishedAt := time.Now().UTC()
 	_ = w.db.WithContext(ctx).
@@ -317,7 +334,11 @@ func (w *Worker) failJob(ctx context.Context, token string, statusID int, msg st
 		}).Error
 	w.publishRedisStatus(ctx, token, statusID)
 	w.publishDoneNotification(token, statusID)
-	w.metrics.JobsFailed.WithLabelValues(w.id, fmt.Sprintf("%d", statusID)).Inc()
+	statusName := models.StatusDescriptions[statusID]
+	if statusName == "" {
+		statusName = fmt.Sprintf("%d", statusID)
+	}
+	w.metrics.JobsFailed.WithLabelValues(w.id, statusName, langName).Inc()
 	return fmt.Errorf("job %s failed with status %d: %s", token, statusID, msg)
 }
 

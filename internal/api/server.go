@@ -52,6 +52,7 @@ func NewServer(
 	r.Use(gin.Recovery())
 
 	// Global middleware stack (order matters).
+	r.Use(middleware.Metrics(m))
 	r.Use(middleware.SecureHeaders())
 	r.Use(middleware.CORS(cfg))
 	r.Use(middleware.MaxBodySize(10 * 1024 * 1024)) // 10 MB

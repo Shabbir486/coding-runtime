@@ -12,6 +12,8 @@ type Metrics struct {
 	JobsFailed        *prometheus.CounterVec
 	JobsDLQ           *prometheus.CounterVec
 	JobDuration       *prometheus.HistogramVec
+	JobMemoryBytes    *prometheus.HistogramVec
+	JobCPUTime        *prometheus.HistogramVec
 	InFlightJobs      *prometheus.GaugeVec
 	QueueDepth        *prometheus.GaugeVec
 	RetryAttempts     *prometheus.CounterVec
@@ -30,21 +32,21 @@ func New(namespace string) *Metrics {
 			Subsystem: "queue",
 			Name:      "jobs_published_total",
 			Help:      "Total number of jobs published to NATS.",
-		}, []string{"subject", "language_id"}),
+		}, []string{"subject", "language"}),
 
 		JobsConsumed: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: "queue",
 			Name:      "jobs_consumed_total",
 			Help:      "Total number of jobs consumed by workers.",
-		}, []string{"worker_id", "status"}),
+		}, []string{"worker_id", "status", "language"}),
 
 		JobsFailed: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: "queue",
 			Name:      "jobs_failed_total",
 			Help:      "Total number of jobs that failed processing.",
-		}, []string{"worker_id", "failure_type"}),
+		}, []string{"worker_id", "failure_type", "language"}),
 
 		JobsDLQ: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
@@ -59,7 +61,23 @@ func New(namespace string) *Metrics {
 			Name:      "job_duration_seconds",
 			Help:      "Duration of job execution in seconds.",
 			Buckets:   []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300},
-		}, []string{"worker_id", "language_id"}),
+		}, []string{"worker_id", "language"}),
+
+		JobMemoryBytes: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "queue",
+			Name:      "job_memory_bytes",
+			Help:      "Maximum memory used by job execution in bytes.",
+			Buckets:   []float64{1024 * 1024 * 10, 1024 * 1024 * 50, 1024 * 1024 * 100, 1024 * 1024 * 250, 1024 * 1024 * 500},
+		}, []string{"worker_id", "language"}),
+
+		JobCPUTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: "queue",
+			Name:      "job_cpu_time_seconds",
+			Help:      "Total CPU time consumed by job execution in seconds.",
+			Buckets:   []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
+		}, []string{"worker_id", "language"}),
 
 		InFlightJobs: promauto.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: namespace,

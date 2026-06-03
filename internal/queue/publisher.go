@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/mdshabbir-ali/code-runtime/internal/config"
+	"github.com/mdshabbir-ali/code-runtime/internal/metrics"
 	"github.com/mdshabbir-ali/code-runtime/internal/models"
 )
 
@@ -38,16 +39,17 @@ type Publisher interface {
 
 // NATSPublisher implements Publisher using NATS JetStream.
 type NATSPublisher struct {
-	client *Client
-	logger *zap.Logger
+	client  *Client
+	logger  *zap.Logger
+	metrics *metrics.Metrics
 }
 
 // NewPublisher creates a NATSPublisher backed by the given Client.
-func NewPublisher(client *Client, logger *zap.Logger) *NATSPublisher {
+func NewPublisher(client *Client, logger *zap.Logger, m *metrics.Metrics) *NATSPublisher {
 	if logger == nil {
 		logger, _ = zap.NewProduction()
 	}
-	return &NATSPublisher{client: client, logger: logger}
+	return &NATSPublisher{client: client, logger: logger, metrics: m}
 }
 
 // PublishJob serialises job as JSON and publishes it to the normal submissions
@@ -169,6 +171,13 @@ func (p *NATSPublisher) publishWithRetry(ctx context.Context, subject string, jo
 				zap.String("subject", subject),
 				zap.Int("attempt", attempt+1),
 			)
+			if p.metrics != nil && p.metrics.JobsPublished != nil {
+				langName := job.LanguageName
+				if langName == "" {
+					langName = "unknown"
+				}
+				p.metrics.JobsPublished.WithLabelValues(subject, langName).Inc()
+			}
 			return nil
 		}
 
@@ -227,7 +236,7 @@ func isTransientNATSError(err error) bool {
 // If a required stream does not yet exist, the first Publish() call will fail
 // fast with a JetStream "no stream matches subject" error, which is the
 // desired signal to operators that queue-manager has not run yet.
-func NewNATSPublisher(cfg *config.Config, logger *zap.Logger) (*NATSPublisher, error) {
+func NewNATSPublisher(cfg *config.Config, logger *zap.Logger, m *metrics.Metrics) (*NATSPublisher, error) {
 	nCfg := DefaultNATSConfig(cfg.NATS.URL)
 	nCfg.MaxReconnects = cfg.NATS.MaxReconnects
 	nCfg.ReconnectWait = cfg.NATS.ReconnectWait
@@ -238,7 +247,7 @@ func NewNATSPublisher(cfg *config.Config, logger *zap.Logger) (*NATSPublisher, e
 		return nil, fmt.Errorf("queue: connect to NATS: %w", err)
 	}
 
-	return NewPublisher(client, logger), nil
+	return NewPublisher(client, logger, m), nil
 }
 
 // Close drains and closes the underlying NATS connection gracefully.

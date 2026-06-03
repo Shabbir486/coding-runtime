@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/docker/docker/client"
 	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	"github.com/mdshabbir-ali/code-runtime/internal/cache"
@@ -67,6 +70,21 @@ func run() error {
 	defer drainNATS(natsConn)
 
 	m := metrics.New(cfg.Metrics.Namespace)
+
+	// Start metrics server
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsServer := &http.Server{
+		Addr:    ":8082",
+		Handler: metricsMux,
+	}
+	go func() {
+		logger.Info("worker metrics server listening", zap.String("addr", metricsServer.Addr))
+		if err := metricsServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("metrics server failed", zap.Error(err))
+		}
+	}()
+	defer metricsServer.Close()
 
 	sand, err := setupSandbox(cfg, logger, m)
 	if err != nil {

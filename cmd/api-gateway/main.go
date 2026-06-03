@@ -80,15 +80,16 @@ func main() {
 	subCache := cache.NewSubmissionCache(redisClient)
 	langCache := cache.NewLanguageCache(redisClient)
 
+	// ---- Metrics -------------------------------------------------------------
+	queueMetrics := metrics.New(cfg.Metrics.Namespace)
+	apiMetrics := metrics.NewAPIMetrics(cfg.Metrics.Namespace)
+
 	// ---- NATS ----------------------------------------------------------------
-	publisher, err := queue.NewNATSPublisher(cfg, log)
+	publisher, err := queue.NewNATSPublisher(cfg, log, queueMetrics)
 	if err != nil {
 		log.Fatal("failed to connect to NATS", zap.Error(err))
 	}
 	defer publisher.Close()
-
-	// ---- Metrics -------------------------------------------------------------
-	apiMetrics := metrics.NewAPIMetrics(cfg.Metrics.Namespace)
 
 	// ---- Handlers ------------------------------------------------------------
 	handlerBundle := &routes.Handlers{

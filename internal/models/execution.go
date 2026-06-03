@@ -30,6 +30,7 @@ func (r *ExecutionResult) HasCompileError() bool {
 type ExecutionJob struct {
 	SubmissionToken string    `json:"submission_token"`
 	LanguageID      int       `json:"language_id"`
+	LanguageName    string    `json:"language_name,omitempty"`
 	SourceCode      string    `json:"source_code"`
 	Stdin           string    `json:"stdin"`
 	ExpectedOutput  string    `json:"expected_output"`

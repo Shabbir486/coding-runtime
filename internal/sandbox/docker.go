@@ -2,11 +2,13 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -382,6 +384,38 @@ func (s *DockerSandbox) runContainer(
 		return nil, fmt.Errorf("container start: %w", err)
 	}
 
+	var maxMem atomic.Int64
+	var totalCPU atomic.Int64
+
+	statsResp, statsErr := s.client.ContainerStats(runCtx, containerID, true)
+	if statsErr == nil {
+		go func() {
+			defer statsResp.Body.Close()
+			decoder := json.NewDecoder(statsResp.Body)
+			for {
+				var v struct {
+					MemoryStats struct {
+						MaxUsage int64 `json:"max_usage"`
+					} `json:"memory_stats"`
+					CPUStats struct {
+						CPUUsage struct {
+							TotalUsage int64 `json:"total_usage"`
+						} `json:"cpu_usage"`
+					} `json:"cpu_stats"`
+				}
+				if err := decoder.Decode(&v); err != nil {
+					break
+				}
+				if v.MemoryStats.MaxUsage > maxMem.Load() {
+					maxMem.Store(v.MemoryStats.MaxUsage)
+				}
+				if v.CPUStats.CPUUsage.TotalUsage > totalCPU.Load() {
+					totalCPU.Store(v.CPUStats.CPUUsage.TotalUsage)
+				}
+			}
+		}()
+	}
+
 	// Write stdin if provided (non-blocking; goroutine writes and closes).
 	if stdin != "" {
 		go func() {
@@ -467,14 +501,24 @@ func (s *DockerSandbox) runContainer(
 	// Map exit code to status.
 	status := mapExitCode(exitCode, exitSignal, wallElapsed, req.WallTimeLimit)
 
+	finalMem := maxMem.Load()
+	if finalMem == 0 {
+		finalMem = memUsed // fallback to inspect or 0
+	}
+
+	finalCPU := float64(totalCPU.Load()) / 1e9 // nano to seconds
+	if finalCPU <= 0 {
+		finalCPU = wallElapsed // fallback
+	}
+
 	out := &containerOutput{
 		stdout:     stdoutBuf.String(),
 		stderr:     stderrBuf.String(),
 		combined:   stdoutBuf.String() + stderrBuf.String(),
 		exitCode:   exitCode,
 		exitSignal: exitSignal,
-		cpuTime:    wallElapsed, // approximate until we have cgroup metrics
-		memoryUsed: memUsed,
+		cpuTime:    finalCPU,
+		memoryUsed: finalMem,
 		status:     status,
 	}
 

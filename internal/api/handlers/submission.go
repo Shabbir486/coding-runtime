@@ -138,6 +138,10 @@ func (h *SubmissionHandler) seedCacheAndPublish(c *gin.Context, sub *models.Subm
 	_ = h.subCache.Set(c.Request.Context(), sub.Token, &initialResp)
 
 	job := submissionToJob(sub)
+	if lang, err := h.languageRepo.GetByID(c.Request.Context(), sub.LanguageID); err == nil && lang != nil {
+		job.LanguageName = lang.Name
+	}
+
 	if err := h.queue.PublishJob(c.Request.Context(), job); err != nil {
 		h.log.Error("failed to publish submission",
 			zap.String("token", sub.Token), zap.Error(err))

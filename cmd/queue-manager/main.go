@@ -63,12 +63,14 @@ func run(logger *zap.Logger) error {
 	dlqHandler := queue.NewDLQHandler(natsClient, subRepo, logRepo, logger)
 
 	// Metrics are registered globally via promauto — just instantiate.
-	_ = metrics.New(cfg.Metrics.Namespace)
+	globalMetrics := metrics.New(cfg.Metrics.Namespace)
 
 	httpServer := buildHTTPServer(cfg, natsClient, logger)
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
+
+	startQueueDepthPoller(rootCtx, natsClient, globalMetrics, logger)
 
 	dlqErrCh := startDLQProcessor(rootCtx, dlqHandler, logger)
 	httpErrCh := startHTTPServer(httpServer, logger)
@@ -151,6 +153,28 @@ func startDLQProcessor(ctx context.Context, dlq *queue.DLQHandler, logger *zap.L
 		ch <- err
 	}()
 	return ch
+}
+
+// startQueueDepthPoller periodically fetches stream info to record queue depth.
+func startQueueDepthPoller(ctx context.Context, client *queue.Client, m *metrics.Metrics, logger *zap.Logger) {
+	ticker := time.NewTicker(5 * time.Second)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+				js := client.JetStream()
+				if info, err := js.StreamInfo("SUBMISSIONS"); err == nil && info != nil {
+					m.QueueDepth.WithLabelValues("submissions").Set(float64(info.State.Msgs))
+				}
+				if info, err := js.StreamInfo("SUBMISSIONS_PRIORITY"); err == nil && info != nil {
+					m.QueueDepth.WithLabelValues("submissions_priority").Set(float64(info.State.Msgs))
+				}
+			}
+		}
+	}()
 }
 
 // startHTTPServer launches the HTTP server goroutine and returns its error channel.

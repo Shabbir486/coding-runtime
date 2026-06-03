@@ -5,23 +5,40 @@ global:
   external_labels:
     cluster: coderuntime
 
-# This file is mounted into the prometheus service from docker-compose.yml.
-# It only includes scrape targets that actually exist in the dev compose stack.
-# For Kubernetes, the Helm chart uses the upstream prometheus-community
-# subchart with its own configuration — do not reuse this file there.
-
 scrape_configs:
-  # Prometheus self-monitoring
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
 
-  # API Gateway exposes /metrics on its HTTP port (set in docker-compose.yml).
   - job_name: api-gateway
-    static_configs:
-      - targets: ["api:8002"]
+    dns_sd_configs:
+      - names: ["api"]
+        type: A
+        port: 8002
     metrics_path: /metrics
     scrape_interval: 10s
     relabel_configs:
       - target_label: service
         replacement: api-gateway
+
+  - job_name: queue-manager
+    dns_sd_configs:
+      - names: ["queue-manager"]
+        type: A
+        port: 8081
+    metrics_path: /metrics
+    scrape_interval: 10s
+    relabel_configs:
+      - target_label: service
+        replacement: queue-manager
+
+  - job_name: worker
+    dns_sd_configs:
+      - names: ["worker"]
+        type: A
+        port: 8082
+    metrics_path: /metrics
+    scrape_interval: 10s
+    relabel_configs:
+      - target_label: service
+        replacement: worker
