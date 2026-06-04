@@ -94,8 +94,8 @@ docker-push: docker-build ## Push Docker images to registry
 compose-up: ## Pull infra images, build api/worker, then start all services
 	@echo ">> Pulling infrastructure images..."
 	docker-compose pull postgres redis nats prometheus grafana jaeger
-	@echo ">> Building API and Worker images..."
-	docker-compose build --parallel api worker
+	@echo ">> Building API, Queue Manager, and Worker images..."
+	docker-compose build --parallel api queue-manager worker
 	@echo ">> Starting services..."
 	docker-compose up -d
 	@echo ">> Services started. API available at http://localhost:8002"
