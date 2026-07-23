@@ -11,8 +11,8 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/metrics"
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
+	"github.com/revature/corems-code-executor/internal/metrics"
+	"github.com/revature/corems-code-executor/internal/models"
 )
 
 const (

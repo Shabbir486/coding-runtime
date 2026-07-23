@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
+	"github.com/revature/corems-code-executor/internal/models"
 )
 
 var tracer = otel.Tracer("code-runtime/database")
@@ -44,6 +44,7 @@ type LanguageRepository interface {
 	GetAll(ctx context.Context) ([]*models.Language, error)
 	GetByID(ctx context.Context, id int) (*models.Language, error)
 	GetActive(ctx context.Context) ([]*models.Language, error)
+	SetActive(ctx context.Context, id int, active bool) (*models.Language, error)
 }
 
 // ExecutionLogRepository defines persistence operations for worker execution logs.
@@ -350,6 +351,29 @@ func (r *languageRepo) GetActive(ctx context.Context) ([]*models.Language, error
 	return langs, nil
 }
 
+// SetActive flips a language's is_active flag and returns the updated row.
+// Returns ErrNotFound if no language has the given id.
+func (r *languageRepo) SetActive(ctx context.Context, id int, active bool) (*models.Language, error) {
+	ctx, span := tracer.Start(ctx, "db.language.SetActive",
+		trace.WithAttributes(attribute.Int("language.id", id), attribute.Bool("active", active)))
+	defer span.End()
+
+	res := r.db.WithContext(ctx).
+		Model(&models.Language{}).
+		Where("id = ?", id).
+		Update("is_active", active)
+	if res.Error != nil {
+		span.RecordError(res.Error)
+		span.SetStatus(codes.Error, res.Error.Error())
+		return nil, fmt.Errorf("languageRepo.SetActive: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		span.SetStatus(codes.Error, "not found")
+		return nil, fmt.Errorf("languageRepo.SetActive %d: %w", id, ErrNotFound)
+	}
+	return r.GetByID(ctx, id)
+}
+
 // -----------------------------------------------------------------------
 // executionLogRepo
 // -----------------------------------------------------------------------
@@ -497,6 +521,8 @@ type Repositories struct {
 	Languages     LanguageRepository
 	ExecutionLogs ExecutionLogRepository
 	Users         UserRepository
+	Batches       BatchRepository
+	Webhooks      WebhookRepository
 }
 
 // NewRepositories constructs all repositories from a single *DB.
@@ -506,5 +532,7 @@ func NewRepositories(db *DB) *Repositories {
 		Languages:     NewLanguageRepository(db),
 		ExecutionLogs: NewExecutionLogRepository(db),
 		Users:         NewUserRepository(db),
+		Batches:       NewBatchRepository(db),
+		Webhooks:      NewWebhookRepository(db),
 	}
 }

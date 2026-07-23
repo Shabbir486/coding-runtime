@@ -47,14 +47,22 @@ use this prefix. If you fork manifests, keep the prefix.
 | Variable                                | Purpose                                  | Default     |
 |-----------------------------------------|------------------------------------------|-------------|
 | `CODERUNTIME_SERVER_PORT`               | API HTTP port                            | `8002`      |
-| `CODERUNTIME_DATABASE_HOST`             | Postgres hostname                        | `localhost` |
-| `CODERUNTIME_DATABASE_USER`             | Postgres user                            | `postgres`  |
-| `CODERUNTIME_DATABASE_PASSWORD`         | Postgres password                        | (empty)     |
-| `CODERUNTIME_DATABASE_NAME`             | Postgres DB name                         | `coderuntime` |
-| `CODERUNTIME_DATABASE_SSL_MODE`         | `disable` / `require` / `verify-full`    | `disable`   |
-| `CODERUNTIME_REDIS_HOST`                | Redis hostname                           | `localhost` |
-| `CODERUNTIME_REDIS_PASSWORD`            | Redis auth                               | (empty)     |
-| `CODERUNTIME_NATS_URL`                  | NATS connection URL                      | `nats://localhost:4222` |
+| `CODERUNTIME_DATABASE_HOST`             | MySQL hostname (RDS endpoint in prod)    | `localhost` |
+| `CODERUNTIME_DATABASE_PORT`             | MySQL port                               | `3306`      |
+| `CODERUNTIME_DATABASE_USER`             | MySQL user                               | `coderuntime` |
+| `CODERUNTIME_DATABASE_PASSWORD`         | MySQL password                           | (empty)     |
+| `CODERUNTIME_DATABASE_NAME`             | MySQL DB name                            | `coderuntime` |
+| `CODERUNTIME_DATABASE_SSL_MODE`         | MySQL TLS: `disable`/`true`/`skip-verify`/`preferred` | `disable` |
+| `CODERUNTIME_REDIS_HOST`                | Redis hostname (ElastiCache endpoint in prod) | `localhost` |
+| `CODERUNTIME_REDIS_PASSWORD`            | Redis auth (empty for ElastiCache, no AUTH token) | (empty)     |
+| `CODERUNTIME_REDIS_TLS_ENABLED`         | In-transit TLS — `true` for ElastiCache Serverless | `false`     |
+| `CODERUNTIME_NATS_URL`                  | NATS connection URL (nats provider)      | `nats://localhost:4222` |
+| `CODERUNTIME_QUEUE_PROVIDER`            | Job queue backend: `nats` or `sqs`       | `nats`      |
+| `CODERUNTIME_SQS_REGION`                | AWS region (sqs provider)                | `us-east-1` |
+| `CODERUNTIME_SQS_JOBS_QUEUE_URL`        | Per-submission execution-job queue URL   | (empty)     |
+| `CODERUNTIME_SQS_PRIORITY_QUEUE_URL`    | High-priority SQS queue URL              | (empty)     |
+| `CODERUNTIME_SQS_START_QUEUE_URL`       | START_BATCH_PROCESSING event queue URL   | (empty)     |
+| `CODERUNTIME_SQS_DLQ_QUEUE_URL`         | Dead-letter SQS queue URL                | (empty)     |
 | `CODERUNTIME_JWT_SECRET`                | HS256 signing secret (min 32 chars)      | (required)  |
 | `CODERUNTIME_DOCKER_HOST`               | Worker → Docker daemon socket            | `unix:///var/run/docker.sock` |
 | `CODERUNTIME_WORKER_COUNT`              | Concurrent jobs per worker process       | `4`         |
@@ -70,7 +78,7 @@ list (search for `v.SetDefault`).
 
 ## 3. Local development (Docker Compose)
 
-The fastest path. Everything runs on one host, no auth on Postgres/Redis,
+The fastest path. Everything runs on one host (MySQL in a local container),
 sandboxes use a bind-mounted `/tmp/sandbox`.
 
 ### 3.1 Build sandbox runtime images
@@ -99,7 +107,7 @@ and starts:
 |-------------|-------------|-------------------------------------------|
 | api         | 8002        | REST API gateway                          |
 | worker      | —           | Executes sandbox jobs (×2 replicas)       |
-| postgres    | 5432        | Submissions, languages, statuses          |
+| mysql       | 3307→3306   | Submissions, languages, statuses          |
 | redis       | 6379        | Rate-limit + caching                      |
 | nats        | 4222, 8222  | Job queue (JetStream) + monitoring        |
 | prometheus  | 9090        | Metrics scraping                          |
@@ -108,13 +116,16 @@ and starts:
 
 ### 3.3 Seed the database
 
-The API auto-seeds languages on startup (`SeedLanguages` in
-[internal/models/language.go](../internal/models/language.go)), but you can
-also run:
+The api-gateway auto-migrates the schema and seeds reference data on startup
+(`database.MigrateAndSeed`, when `migrate_on_start=true`). To run the same
+logic standalone — e.g. against **AWS RDS before** rolling out api/worker —
+use the `cmd/migrate` tool via Make (connection comes from the same
+`CODERUNTIME_*` env / `.env`):
 
 ```bash
-make migrate   # apply DB migrations
-make seed      # idempotent language + status seed
+make migrate          # schema migrations + seed statuses & languages (idempotent)
+make migrate-schema   # schema migrations only
+make seed             # seed statuses & languages only
 ```
 
 ### 3.4 Verify
@@ -156,7 +167,7 @@ docker compose \
 The prod override ([`docker-compose.prod.yml`](../docker-compose.prod.yml)):
 
 - Pulls images from `${REGISTRY}/coderuntime-api:${IMAGE_TAG}` instead of building locally.
-- Hides postgres / redis / nats / grafana / jaeger from the host — only the
+- Hides mysql / redis / nats / grafana / jaeger from the host — only the
   ingress (nginx / lb) should reach the API.
 - Sets `deploy.replicas`, rolling-update policy, and resource limits.
 - Switches the overlay network to encrypted mode for Swarm.
@@ -168,11 +179,12 @@ Export these (or use a `.env` file next to `docker-compose.prod.yml`):
 ```bash
 export REGISTRY=ghcr.io/yourorg
 export IMAGE_TAG=1.0.0
-export DATABASE_HOST=postgres.internal
+export DATABASE_HOST=your-db.cluster-xxxx.us-east-1.rds.amazonaws.com  # AWS RDS endpoint (or mysql.internal)
 export DATABASE_USER=coderuntime
 export DATABASE_PASSWORD='...'
-export REDIS_HOST=redis.internal
-export REDIS_PASSWORD='...'
+export REDIS_HOST=code-executor-xxxx.serverless.use2.cache.amazonaws.com  # AWS ElastiCache endpoint (or redis.internal)
+export REDIS_PASSWORD=''                 # ElastiCache Serverless uses no AUTH token
+export REDIS_TLS_ENABLED=true            # ElastiCache Serverless requires in-transit TLS
 export NATS_URL=nats://nats.internal:4222
 export JWT_SECRET="$(openssl rand -base64 48)"
 export OTEL_ENDPOINT=http://otel-collector.internal:4318
@@ -189,23 +201,27 @@ docker stack deploy -c docker-compose.yml -c docker-compose.prod.yml coderuntime
 
 ---
 
-## 5. Kubernetes — raw manifests
+## 5. Kubernetes
 
-The manifests under [`deployments/kubernetes/`](kubernetes/) are intentionally
-verbose (PodDisruptionBudget, HPA, NetworkPolicy, RBAC, PriorityClass) so they
-can be diffed and audited. Apply them in this order:
+The Kubernetes manifests are split into two **self-contained, separated**
+environments under [`deployments/kubernetes/`](kubernetes/) — see
+[kubernetes/README.md](kubernetes/README.md) for the routing table:
 
-```bash
-kubectl apply -f deployments/kubernetes/namespace.yaml
-# Fill in real base64 values first — see comments in the file.
-kubectl apply -f deployments/kubernetes/secrets.yaml
-kubectl apply -f deployments/kubernetes/configmap.yaml
-kubectl apply -f deployments/kubernetes/postgres-statefulset.yaml
-kubectl apply -f deployments/kubernetes/redis-statefulset.yaml
-kubectl apply -f deployments/kubernetes/nats-statefulset.yaml
-kubectl apply -f deployments/kubernetes/api-deployment.yaml
-kubectl apply -f deployments/kubernetes/worker-deployment.yaml
-```
+| Environment | Folder | One-command bring-up |
+|---|---|---|
+| **Local** (kind, in-cluster MySQL/Redis, DooD, static SQS keys) | [`kubernetes/local/`](kubernetes/local/) | `deployments/kubernetes/local/setup.sh` |
+| **AWS / EKS** (the live cluster: RDS, dind+ECR, IRSA, cluster-autoscaler) | [`kubernetes/eks/`](kubernetes/eks/) | `deployments/kubernetes/eks/setup.sh` (teardown: `eks/teardown.sh`) |
+
+Both run the SQS queue provider and KEDA worker autoscaling; both build from the
+same `docker/Dockerfile.*` images and `runtime-images/` sandboxes. Full details:
+[local/README.md](kubernetes/local/README.md) and [eks/DEPLOY.md](kubernetes/eks/DEPLOY.md).
+
+> The old flat manifests (`namespace.yaml`, `configmap.yaml`, …) and the Helm
+> chart under `deployments/helm/` have been removed in favor of these two
+> curated, apply-able environment folders.
+
+The notes below on ConfigMap layout, Secrets, and the worker Docker socket apply
+to both environments.
 
 ### ConfigMap layout
 
@@ -288,73 +304,7 @@ Or pre-bake them into a node image / use DaemonSet image pre-pullers.
 
 ---
 
-## 6. Kubernetes — Helm chart
-
-[`deployments/helm/`](helm/) packages the same workload plus Bitnami
-postgres / redis / nats / prometheus / grafana subcharts.
-
-```bash
-cd deployments/helm
-helm dependency update
-helm install coderuntime . \
-  --namespace coderuntime --create-namespace \
-  --set global.imageRegistry=ghcr.io/yourorg \
-  --set global.imageTag=1.0.0 \
-  -f my-values.yaml
-```
-
-The chart renders these templates for the API + worker:
-
-| Template               | Purpose                                       |
-|------------------------|-----------------------------------------------|
-| `_helpers.tpl`         | Shared name/label helpers                     |
-| `deployment.yaml`      | API + worker Deployments                      |
-| `configmap.yaml`       | common-config, api-config, worker-config      |
-| `secret.yaml`          | api-secrets, worker-secrets (b64enc applied)  |
-| `serviceaccount.yaml`  | One ServiceAccount per component              |
-| `service.yaml`         | api ClusterIP Service + worker headless metrics Service |
-
-PostgreSQL, Redis, NATS, Prometheus, Grafana, and Jaeger come from the
-Bitnami / community subcharts declared in [`Chart.yaml`](helm/Chart.yaml).
-
-`my-values.yaml` should override:
-
-```yaml
-global:
-  imageRegistry: ghcr.io/yourorg
-  imageTag: "1.0.0"
-
-postgresql:
-  auth:
-    password: "..."
-redis:
-  auth:
-    password: "..."
-
-api:
-  secrets:
-    jwtSecret: "..."           # rendered through b64enc — pass plain text
-
-worker:
-  securityContext:
-    dockerGroupGid: 999        # set to host's docker group GID
-```
-
-### Verifying the chart renders before install
-
-```bash
-cd deployments/helm
-helm dependency update
-helm template test . -f my-values.yaml | less
-```
-
-If `helm template` fails with `function "include" not defined for "X"`,
-delete subchart-only references; if it fails on a missing value, add it to
-`my-values.yaml`.
-
----
-
-## 7. Observability
+## 6. Observability
 
 | Concern   | Path                                                        |
 |-----------|-------------------------------------------------------------|
@@ -405,11 +355,72 @@ helm rollback coderuntime 1 -n coderuntime
 
 ---
 
+## 8b. Amazon SQS job queue (optional)
+
+By default the platform uses the bundled NATS JetStream. To use **Amazon SQS**
+instead, set `CODERUNTIME_QUEUE_PROVIDER=sqs` plus the `SQS_*` queue URLs on the
+api, worker, **and** queue-manager. NATS is then unused (skip/retire it).
+
+**Create three Standard queues** (DLQ first, then wire the redrive policy):
+
+```bash
+REGION=us-east-2
+DLQ=$(aws sqs create-queue --queue-name coderuntime-jobs-dlq --region $REGION --query QueueUrl --output text)
+DLQ_ARN=$(aws sqs get-queue-attributes --queue-url $DLQ --attribute-names QueueArn --region $REGION --query Attributes.QueueArn --output text)
+REDRIVE="{\"deadLetterTargetArn\":\"$DLQ_ARN\",\"maxReceiveCount\":\"3\"}"
+aws sqs create-queue --queue-name coderuntime-jobs          --region $REGION --attributes "{\"RedrivePolicy\":\"$(echo $REDRIVE | sed 's/"/\\"/g')\"}"
+aws sqs create-queue --queue-name coderuntime-jobs-priority --region $REGION --attributes "{\"RedrivePolicy\":\"$(echo $REDRIVE | sed 's/"/\\"/g')\"}"
+# START_BATCH_PROCESSING event queue (your orchestrator publishes {"batch_id":"..."} here)
+aws sqs create-queue --queue-name coderuntime-batch-start    --region $REGION --attributes "{\"RedrivePolicy\":\"$(echo $REDRIVE | sed 's/"/\\"/g')\"}"
+```
+
+Set `VisibilityTimeout` on the job queues ≥ the max job execution time (≥330s).
+
+**Decoupled batch flow.** `POST /batches` only persists the batch (PENDING) and
+returns tokens. Your orchestrator then commits its own token mappings and
+publishes `{"batch_id":"<id>"}` to the **start** queue (`SQS_START_QUEUE_URL`);
+the worker's start consumer fans the batch out to the jobs queue and execution
+begins. This guarantees no result webhook can fire before your persistence is
+committed. (Locally / without an orchestrator, `POST /batches/:id/start` does the
+same thing synchronously.)
+
+**IAM policy** for the task/instance role (credentials are never put in config):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": [
+      "sqs:SendMessage", "sqs:SendMessageBatch",
+      "sqs:ReceiveMessage", "sqs:DeleteMessage",
+      "sqs:ChangeMessageVisibility", "sqs:GetQueueAttributes"
+    ],
+    "Resource": [
+      "arn:aws:sqs:us-east-2:<acct>:coderuntime-jobs",
+      "arn:aws:sqs:us-east-2:<acct>:coderuntime-jobs-priority",
+      "arn:aws:sqs:us-east-2:<acct>:coderuntime-batch-start",
+      "arn:aws:sqs:us-east-2:<acct>:coderuntime-jobs-dlq"
+    ]
+  }]
+}
+```
+
+Notes: messages carry only the submission **token** (the worker re-reads the job
+from MySQL, avoiding the 256 KB SQS limit); the priority queue is polled before
+the normal queue; retries and dead-lettering are handled by the **SQS redrive
+policy**; queue-manager runs an SQS DLQ drainer (marks dead-lettered submissions
+failed) and publishes queue-depth metrics. For **local** SQS, point
+`CODERUNTIME_SQS_ENDPOINT` at ElasticMQ/LocalStack.
+
+---
+
 ## 9. Troubleshooting
 
 | Symptom                                                              | Likely cause                                                                                       |
 |----------------------------------------------------------------------|----------------------------------------------------------------------------------------------------|
-| API logs `database connection refused`                               | `CODERUNTIME_DATABASE_HOST` empty/wrong, or postgres not ready yet                                 |
+| API logs `database connection refused`                               | `CODERUNTIME_DATABASE_HOST` empty/wrong, RDS security group blocks the port, or mysql not ready yet |
+| API logs `tls: ...` / handshake error connecting to RDS              | `CODERUNTIME_DATABASE_SSL_MODE` mismatch — RDS needs `true` (or `skip-verify` without the RDS CA bundle) |
 | API ignores all your env config, falls back to defaults              | Env vars not prefixed with `CODERUNTIME_`                                                          |
 | Worker logs `pull access denied for code-runtime-*:latest`           | `make pull-images` was skipped — locally-built sandbox images aren't on Docker Hub                 |
 | Docker warning *Image may have poor performance under emulation*     | Running an `amd64`-only sandbox image on Apple Silicon. Build the local `code-runtime-*` variant.  |
@@ -422,7 +433,7 @@ helm rollback coderuntime 1 -n coderuntime
 ## 10. Production checklist
 
 - [ ] `CODERUNTIME_JWT_SECRET` is at least 32 random chars and stored in a real secret manager.
-- [ ] Postgres has `SSL_MODE=require` or stricter; backups are configured.
+- [ ] MySQL has `CODERUNTIME_DATABASE_SSL_MODE=true` (TLS on); RDS automated backups / snapshots are enabled.
 - [ ] Redis requires auth (`requirepass`) and is bound to a private network.
 - [ ] NATS JetStream has persistent storage.
 - [ ] Worker pods run on dedicated `node-type: compute-optimized` nodes (see worker affinity).
@@ -434,3 +445,6 @@ helm rollback coderuntime 1 -n coderuntime
 - [ ] HPA min/max replicas tuned to your traffic.
 - [ ] Image tags pinned (no `:latest` in production).
 - [ ] Prometheus scrape config, alerting rules, and Grafana dashboards reviewed.
+
+-- After local deployment expose the port
+kubectl --context kind-coderuntime-local -n coderuntime port-forward deploy/api-gateway 18002:8002

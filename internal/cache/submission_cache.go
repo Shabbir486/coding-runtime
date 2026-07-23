@@ -7,7 +7,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
+	"github.com/revature/corems-code-executor/internal/models"
 )
 
 const (

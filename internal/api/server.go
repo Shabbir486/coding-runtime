@@ -9,12 +9,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/api/middleware"
-	"github.com/mdshabbir-ali/code-runtime/internal/api/routes"
-	"github.com/mdshabbir-ali/code-runtime/internal/cache"
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
-	"github.com/mdshabbir-ali/code-runtime/internal/database"
-	"github.com/mdshabbir-ali/code-runtime/internal/metrics"
+	"github.com/revature/corems-code-executor/internal/api/middleware"
+	"github.com/revature/corems-code-executor/internal/api/routes"
+	"github.com/revature/corems-code-executor/internal/cache"
+	"github.com/revature/corems-code-executor/internal/config"
+	"github.com/revature/corems-code-executor/internal/database"
+	"github.com/revature/corems-code-executor/internal/metrics"
 )
 
 // Server wraps the Gin engine and net/http server, wiring all middleware and routes.
@@ -58,7 +58,12 @@ func NewServer(
 	r.Use(middleware.MaxBodySize(10 * 1024 * 1024)) // 10 MB
 	r.Use(middleware.RequestLogger(log))
 
-	// Trust configured proxies for real client IP detection.
+	// Resolve the real client IP behind a load balancer / ingress so rate-limit
+	// buckets are keyed per client. Without trusting the proxy CIDRs, every
+	// request appears to come from the proxy's IP and all clients collapse into
+	// a single bucket — a common cause of spurious 429s. Set
+	// CODERUNTIME_SERVER_TRUSTED_PROXIES to your LB/ingress CIDR(s) in prod.
+	r.ForwardedByClientIP = true
 	if len(cfg.Server.TrustedProxies) > 0 {
 		_ = r.SetTrustedProxies(cfg.Server.TrustedProxies)
 	}

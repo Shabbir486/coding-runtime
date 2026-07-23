@@ -1,0 +1,13 @@
+# gp3 StorageClass for the Redis PVC (backed by the AWS EBS CSI driver, which is
+# installed as an EKS addon in cluster.yaml). WaitForFirstConsumer so the volume
+# is created in the AZ where the pod actually schedules.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete

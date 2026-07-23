@@ -1,0 +1,328 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/version: 1.0.0
+  name: worker
+  namespace: coderuntime
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: worker
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/restartedAt: '2026-06-23T03:27:45+05:30'
+        prometheus.io/path: /metrics
+        prometheus.io/port: '8085'
+        prometheus.io/scrape: 'true'
+      labels:
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/name: worker
+        app.kubernetes.io/version: 1.0.0
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - preference:
+              matchExpressions:
+              - key: node-type
+                operator: In
+                values:
+                - compute-optimized
+            weight: 100
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: worker
+              topologyKey: kubernetes.io/hostname
+            weight: 100
+      automountServiceAccountToken: false
+      containers:
+      - env:
+        - name: CODERUNTIME_DATABASE_HOST
+          valueFrom:
+            secretKeyRef:
+              key: DATABASE_HOST
+              name: worker-secrets
+        - name: CODERUNTIME_DATABASE_USER
+          valueFrom:
+            secretKeyRef:
+              key: DATABASE_USER
+              name: worker-secrets
+        - name: CODERUNTIME_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: DATABASE_PASSWORD
+              name: worker-secrets
+        - name: CODERUNTIME_REDIS_HOST
+          valueFrom:
+            secretKeyRef:
+              key: REDIS_HOST
+              name: worker-secrets
+        - name: CODERUNTIME_REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: REDIS_PASSWORD
+              name: worker-secrets
+        - name: WORKER_ID
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+        # The Docker SDK (client.FromEnv) reads DOCKER_HOST; point both at the
+        # dind sidecar over TCP so the worker never looks for a local socket.
+        - name: CODERUNTIME_DOCKER_HOST
+          value: tcp://localhost:2375
+        - name: DOCKER_HOST
+          value: tcp://localhost:2375
+        - name: CODERUNTIME_WORKER_TMP_DIR
+          value: /sandbox-host
+        envFrom:
+        - configMapRef:
+            name: common-config
+        - configMapRef:
+            name: worker-config
+        - secretRef:
+            name: ecr-registry-auth
+        image: 768054003064.dkr.ecr.ap-southeast-2.amazonaws.com/coderuntime/worker:v2
+        imagePullPolicy: Always
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - sleep 15
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health
+            port: metrics
+            scheme: HTTP
+          initialDelaySeconds: 20
+          periodSeconds: 15
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: worker
+        ports:
+        - containerPort: 8085
+          name: metrics
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /ready
+            port: metrics
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 3
+        resources:
+          limits:
+            cpu: 750m
+            memory: 1Gi
+          requests:
+            cpu: 250m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /sandbox-host
+          name: sandbox
+        - mountPath: /tmp
+          name: tmp
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - 'mkdir -p /sandbox-host
+
+          chmod 1777 /sandbox-host
+
+          echo "Sandbox directory ready"
+
+          '
+        image: busybox:1.36-musl
+        imagePullPolicy: IfNotPresent
+        name: init-sandbox
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: true
+          readOnlyRootFilesystem: false
+          runAsNonRoot: false
+          runAsUser: 0
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /sandbox-host
+          name: sandbox
+      - args:
+        - --host=tcp://0.0.0.0:2375
+        env:
+        - name: DOCKER_TLS_CERTDIR
+        image: docker:27-dind
+        imagePullPolicy: IfNotPresent
+        name: dind
+        readinessProbe:
+          failureThreshold: 3
+          periodSeconds: 10
+          successThreshold: 1
+          tcpSocket:
+            port: 2375
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 1500m
+            memory: 1536Mi
+          requests:
+            cpu: 500m
+            memory: 512Mi
+        restartPolicy: Always
+        securityContext:
+          allowPrivilegeEscalation: true
+          privileged: true
+          runAsNonRoot: false
+          runAsUser: 0
+        startupProbe:
+          failureThreshold: 40
+          periodSeconds: 2
+          successThreshold: 1
+          tcpSocket:
+            port: 2375
+          timeoutSeconds: 1
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/lib/docker
+          name: dind-storage
+        - mountPath: /sandbox-host
+          name: sandbox
+      priorityClassName: worker-priority
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 10001
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+        supplementalGroups:
+        - 0
+        - 999
+      serviceAccount: worker
+      serviceAccountName: worker
+      terminationGracePeriodSeconds: 120
+      topologySpreadConstraints:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: worker
+        maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+      volumes:
+      - emptyDir: {}
+        name: sandbox
+      - emptyDir: {}
+        name: tmp
+      - emptyDir: {}
+        name: dind-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/port: '8085'
+    prometheus.io/scrape: 'true'
+  labels:
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/name: worker
+  name: worker
+  namespace: coderuntime
+spec:
+  ports:
+  - name: metrics
+    port: 8085
+    protocol: TCP
+    targetPort: metrics
+  selector:
+    app.kubernetes.io/name: worker
+  type: ClusterIP
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  finalizers:
+  - finalizer.keda.sh
+  labels:
+    app.kubernetes.io/name: worker
+    scaledobject.keda.sh/name: worker
+  name: worker
+  namespace: coderuntime
+spec:
+  cooldownPeriod: 120
+  maxReplicaCount: 20
+  minReplicaCount: 1
+  pollingInterval: 15
+  scaleTargetRef:
+    name: worker
+  triggers:
+  - authenticationRef:
+      name: keda-aws-sqs
+    metadata:
+      awsRegion: ap-southeast-2
+      identityOwner: operator
+      queueLength: '50'
+      queueURL: https://sqs.ap-southeast-2.amazonaws.com/768054003064/code-submission-processing-queue
+      scaleOnInFlight: 'true'
+    type: aws-sqs-queue
+  - authenticationRef:
+      name: keda-aws-sqs
+    metadata:
+      awsRegion: ap-southeast-2
+      identityOwner: operator
+      queueLength: '50'
+      queueURL: https://sqs.ap-southeast-2.amazonaws.com/768054003064/code-submission-completed-queue
+    type: aws-sqs-queue
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  finalizers:
+  - finalizer.keda.sh
+  name: keda-aws-sqs
+  namespace: coderuntime
+spec:
+  podIdentity:
+    provider: aws
+

@@ -7,7 +7,7 @@
   "variable": [
     {
       "key": "base_url",
-      "value": "http://localhost:8002",
+      "value": "http://aa6f9d7b568b4425f84ea155a296db33-71808099.ap-southeast-2.elb.amazonaws.com",
       "type": "string"
     },
     {
@@ -1222,7 +1222,7 @@
       }
     },
     {
-      "name": "[PASS] R (ID=30)",
+      "name": "[FAIL] R (ID=30)",
       "request": {
         "method": "POST",
         "header": [
@@ -1382,7 +1382,7 @@
       }
     },
     {
-      "name": "[PASS] Swift (ID=34)",
+      "name": "[FAIL] Swift (ID=34)",
       "request": {
         "method": "POST",
         "header": [
@@ -1542,7 +1542,7 @@
       }
     },
     {
-      "name": "[PASS] MySQL (ID=38)",
+      "name": "[FAIL] MySQL (ID=38)",
       "request": {
         "method": "POST",
         "header": [
@@ -1582,7 +1582,7 @@
       }
     },
     {
-      "name": "[PASS] PostgreSQL (ID=39)",
+      "name": "[FAIL] PostgreSQL (ID=39)",
       "request": {
         "method": "POST",
         "header": [
@@ -1622,7 +1622,7 @@
       }
     },
     {
-      "name": "[PASS] MongoDB (ID=40)",
+      "name": "[FAIL] MongoDB (ID=40)",
       "request": {
         "method": "POST",
         "header": [
@@ -2822,7 +2822,7 @@
       }
     },
     {
-      "name": "[PASS] R \u2014 top-customer aggregation (tapply) (ID=30)",
+      "name": "[FAIL] R \u2014 top-customer aggregation (tapply) (ID=30)",
       "request": {
         "method": "POST",
         "header": [
@@ -3142,7 +3142,7 @@
       }
     },
     {
-      "name": "[PASS] MySQL \u2014 top-customer aggregation (CTE) (ID=38)",
+      "name": "[FAIL] MySQL \u2014 top-customer aggregation (CTE) (ID=38)",
       "request": {
         "method": "POST",
         "header": [
@@ -3182,7 +3182,7 @@
       }
     },
     {
-      "name": "[PASS] PostgreSQL \u2014 top-customer aggregation (CTE) (ID=39)",
+      "name": "[FAIL] PostgreSQL \u2014 top-customer aggregation (CTE) (ID=39)",
       "request": {
         "method": "POST",
         "header": [
@@ -3222,7 +3222,7 @@
       }
     },
     {
-      "name": "[PASS] MongoDB \u2014 top-3 customers aggregation (ID=40)",
+      "name": "[FAIL] MongoDB \u2014 top-3 customers aggregation (ID=40)",
       "request": {
         "method": "POST",
         "header": [

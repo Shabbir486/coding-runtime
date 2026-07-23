@@ -62,6 +62,9 @@ func NewClient(cfg NATSConfig, logger *zap.Logger) (*Client, error) {
 
 	opts := []nats.Option{
 		nats.Name("code-runtime-queue"),
+		// Retry the initial connection so service start order doesn't depend on
+		// NATS being up first (compose no longer hard-depends on it).
+		nats.RetryOnFailedConnect(true),
 		nats.MaxReconnects(cfg.MaxReconnects),
 		nats.ReconnectWait(cfg.ReconnectWait),
 		nats.PingInterval(cfg.PingInterval),
@@ -98,6 +101,16 @@ func NewClient(cfg NATSConfig, logger *zap.Logger) (*Client, error) {
 	conn, err := nats.Connect(cfg.URL, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("queue: nats connect %q: %w", cfg.URL, err)
+	}
+
+	// With RetryOnFailedConnect the connection establishes asynchronously; wait
+	// for it before using JetStream (stream creation needs a live connection).
+	for i := 0; i < 150 && !conn.IsConnected(); i++ {
+		time.Sleep(200 * time.Millisecond)
+	}
+	if !conn.IsConnected() {
+		conn.Close()
+		return nil, fmt.Errorf("queue: nats not connected within timeout (%q)", cfg.URL)
 	}
 
 	js, err := conn.JetStream(nats.PublishAsyncMaxPending(256))

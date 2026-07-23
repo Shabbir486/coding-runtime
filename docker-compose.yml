@@ -1,4 +1,6 @@
 
+name: coding-runtime
+
 services:
   api:
     build:
@@ -7,42 +9,80 @@ services:
     ports:
       - "8002:8002"
     environment:
-      - CODERUNTIME_DATABASE_HOST=postgres
-      - CODERUNTIME_DATABASE_PORT=5432
-      - CODERUNTIME_DATABASE_USER=coderuntime
-      - CODERUNTIME_DATABASE_PASSWORD=coderuntime123
-      - CODERUNTIME_DATABASE_NAME=coderuntime
-      - CODERUNTIME_DATABASE_SSL_MODE=disable
+      # DB / AWS RDS. Defaults to the local `mysql` container; override via .env
+      # (see .env.example) to point at RDS — same vars drive all three services.
+      - CODERUNTIME_DATABASE_HOST=${DATABASE_HOST:-mysql}
+      - CODERUNTIME_DATABASE_PORT=${DATABASE_PORT:-3306}
+      - CODERUNTIME_DATABASE_USER=${DATABASE_USER:-coderuntime}
+      - CODERUNTIME_DATABASE_PASSWORD=${DATABASE_PASSWORD:-coderuntime123}
+      - CODERUNTIME_DATABASE_NAME=${DATABASE_NAME:-coderuntime}
+      - CODERUNTIME_DATABASE_SSL_MODE=${DATABASE_SSL_MODE:-disable}
       - CODERUNTIME_DATABASE_MAX_OPEN_CONNS=25
       - CODERUNTIME_DATABASE_MAX_IDLE_CONNS=5
       - CODERUNTIME_DATABASE_CONN_MAX_LIFETIME=5m
-      - CODERUNTIME_REDIS_HOST=redis
-      - CODERUNTIME_REDIS_PORT=6379
+      # Redis / AWS ElastiCache. Defaults to the local `redis` container; to use
+      # ElastiCache (Valkey) Serverless, set in your shell or a .env file:
+      #   REDIS_HOST=code-executor-d8mxso.serverless.use2.cache.amazonaws.com
+      #   REDIS_TLS_ENABLED=true        # ElastiCache Serverless requires TLS
+      # No password is needed (no AUTH token).
+      - CODERUNTIME_REDIS_HOST=${REDIS_HOST:-redis}
+      - CODERUNTIME_REDIS_PORT=${REDIS_PORT:-6379}
       - CODERUNTIME_REDIS_DB=0
-      - CODERUNTIME_REDIS_PASSWORD=
+      - CODERUNTIME_REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - CODERUNTIME_REDIS_TLS_ENABLED=${REDIS_TLS_ENABLED:-false}
       - CODERUNTIME_NATS_URL=nats://nats:4222
+      # Job queue: defaults to NATS. Set QUEUE_PROVIDER=sqs + SQS_* URLs (e.g. in
+      # .env) to use AWS SQS; credentials come from the instance/task IAM role.
+      - CODERUNTIME_QUEUE_PROVIDER=${QUEUE_PROVIDER:-nats}
+      - CODERUNTIME_SQS_REGION=${SQS_REGION:-us-east-1}
+      - CODERUNTIME_SQS_JOBS_QUEUE_URL=${SQS_JOBS_QUEUE_URL:-}
+      - CODERUNTIME_SQS_PRIORITY_QUEUE_URL=${SQS_PRIORITY_QUEUE_URL:-}
+      - CODERUNTIME_SQS_START_QUEUE_URL=${SQS_START_QUEUE_URL:-}
+      - CODERUNTIME_SQS_DLQ_QUEUE_URL=${SQS_DLQ_QUEUE_URL:-}
+      # Batch-completion webhook delivery + retry (worker fires; api callback is single-shot).
+      - CODERUNTIME_WEBHOOK_MAX_RETRIES=${WEBHOOK_MAX_RETRIES:-3}
+      - CODERUNTIME_WEBHOOK_RETRY_DELAY=${WEBHOOK_RETRY_DELAY:-10s}
+      - CODERUNTIME_WEBHOOK_RETRY_BACKOFF=${WEBHOOK_RETRY_BACKOFF:-2.0}
+      - CODERUNTIME_WEBHOOK_RETRY_MAX_DELAY=${WEBHOOK_RETRY_MAX_DELAY:-5m}
+      - CODERUNTIME_WEBHOOK_TIMEOUT=${WEBHOOK_TIMEOUT:-10s}
+      # Batch submission limit (POST /batches)
+      - CODERUNTIME_BATCH_MAX_SIZE=${BATCH_MAX_SIZE:-20}
+      # AWS credentials for SQS (QUEUE_PROVIDER=sqs). For LOCAL testing only —
+      # in prod leave these empty and use an IAM task/instance role. Standard
+      # AWS_* names (read by the SDK's default credential chain), not prefixed.
+      - AWS_REGION=${AWS_REGION:-us-east-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - CODERUNTIME_JWT_SECRET=dev-secret-change-in-prod
       - CODERUNTIME_JWT_ACCESS_TOKEN_EXP=24h
       - CODERUNTIME_SERVER_PORT=8002
       - CODERUNTIME_SERVER_READ_TIMEOUT=30s
       - CODERUNTIME_SERVER_WRITE_TIMEOUT=30s
       - CODERUNTIME_SERVER_IDLE_TIMEOUT=120s
-      - CODERUNTIME_RATE_LIMIT_LIMIT=100
-      - CODERUNTIME_RATE_LIMIT_PERIOD=1m
+      # Per-route-class rate limits (reads/polling generous, writes moderate,
+      # auth tight). Internal services listed in TRUSTED_API_KEYS bypass these.
+      - CODERUNTIME_RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - CODERUNTIME_RATE_LIMIT_READ_LIMIT=${RATE_LIMIT_READ_LIMIT:-1200}
+      - CODERUNTIME_RATE_LIMIT_READ_PERIOD=${RATE_LIMIT_READ_PERIOD:-1m}
+      - CODERUNTIME_RATE_LIMIT_WRITE_LIMIT=${RATE_LIMIT_WRITE_LIMIT:-300}
+      - CODERUNTIME_RATE_LIMIT_WRITE_PERIOD=${RATE_LIMIT_WRITE_PERIOD:-1m}
+      - CODERUNTIME_RATE_LIMIT_AUTH_LIMIT=${RATE_LIMIT_AUTH_LIMIT:-30}
+      - CODERUNTIME_RATE_LIMIT_AUTH_PERIOD=${RATE_LIMIT_AUTH_PERIOD:-1m}
+      - CODERUNTIME_RATE_LIMIT_TRUSTED_API_KEYS=${RATE_LIMIT_TRUSTED_API_KEYS:-}
+      - CODERUNTIME_SERVER_TRUSTED_PROXIES=${SERVER_TRUSTED_PROXIES:-}
       - CODERUNTIME_METRICS_ENABLED=true
       - CODERUNTIME_TRACING_ENABLED=true
       - CODERUNTIME_TRACING_ENDPOINT=http://jaeger:4318
       - CODERUNTIME_TRACING_SERVICE_NAME=api-gateway
-      - CODERUNTIME_WORKER_COUNT=4
+      # Required only to satisfy config validation; the api runs no workers.
+      - CODERUNTIME_WORKER_COUNT=${WORKER_COUNT:-4}
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      nats:
-        condition: service_started
-      # queue-manager owns stream topology; api must not publish before it has
-      # created the streams.
+      # mysql/redis/nats are NOT listed here: mysql/redis sit behind `localinfra`
+      # and nats behind `natsinfra` (both off by default), so prod points at
+      # RDS/ElastiCache/SQS. The DB, Redis and NATS clients all retry on startup.
+      # queue-manager owns NATS stream topology; api must not publish before it
+      # has created the streams (relevant only for the nats provider).
       queue-manager:
         condition: service_healthy
     restart: unless-stopped
@@ -60,21 +100,41 @@ services:
       context: .
       dockerfile: docker/Dockerfile.queue-manager
     environment:
-      - CODERUNTIME_DATABASE_HOST=postgres
-      - CODERUNTIME_DATABASE_PORT=5432
-      - CODERUNTIME_DATABASE_USER=coderuntime
-      - CODERUNTIME_DATABASE_PASSWORD=coderuntime123
-      - CODERUNTIME_DATABASE_NAME=coderuntime
-      - CODERUNTIME_DATABASE_SSL_MODE=disable
+      - CODERUNTIME_DATABASE_HOST=${DATABASE_HOST:-mysql}
+      - CODERUNTIME_DATABASE_PORT=${DATABASE_PORT:-3306}
+      - CODERUNTIME_DATABASE_USER=${DATABASE_USER:-coderuntime}
+      - CODERUNTIME_DATABASE_PASSWORD=${DATABASE_PASSWORD:-coderuntime123}
+      - CODERUNTIME_DATABASE_NAME=${DATABASE_NAME:-coderuntime}
+      - CODERUNTIME_DATABASE_SSL_MODE=${DATABASE_SSL_MODE:-disable}
       - CODERUNTIME_NATS_URL=nats://nats:4222
+      # Job queue: defaults to NATS. Set QUEUE_PROVIDER=sqs + SQS_* URLs (e.g. in
+      # .env) to use AWS SQS; credentials come from the instance/task IAM role.
+      - CODERUNTIME_QUEUE_PROVIDER=${QUEUE_PROVIDER:-nats}
+      - CODERUNTIME_SQS_REGION=${SQS_REGION:-us-east-1}
+      - CODERUNTIME_SQS_JOBS_QUEUE_URL=${SQS_JOBS_QUEUE_URL:-}
+      - CODERUNTIME_SQS_PRIORITY_QUEUE_URL=${SQS_PRIORITY_QUEUE_URL:-}
+      - CODERUNTIME_SQS_START_QUEUE_URL=${SQS_START_QUEUE_URL:-}
+      - CODERUNTIME_SQS_DLQ_QUEUE_URL=${SQS_DLQ_QUEUE_URL:-}
+      # Batch-completion webhook delivery + retry (worker fires; api callback is single-shot).
+      - CODERUNTIME_WEBHOOK_MAX_RETRIES=${WEBHOOK_MAX_RETRIES:-3}
+      - CODERUNTIME_WEBHOOK_RETRY_DELAY=${WEBHOOK_RETRY_DELAY:-10s}
+      - CODERUNTIME_WEBHOOK_RETRY_BACKOFF=${WEBHOOK_RETRY_BACKOFF:-2.0}
+      - CODERUNTIME_WEBHOOK_RETRY_MAX_DELAY=${WEBHOOK_RETRY_MAX_DELAY:-5m}
+      - CODERUNTIME_WEBHOOK_TIMEOUT=${WEBHOOK_TIMEOUT:-10s}
+      # Batch submission limit (POST /batches)
+      - CODERUNTIME_BATCH_MAX_SIZE=${BATCH_MAX_SIZE:-20}
+      # AWS credentials for SQS (QUEUE_PROVIDER=sqs). For LOCAL testing only —
+      # in prod leave these empty and use an IAM task/instance role. Standard
+      # AWS_* names (read by the SDK's default credential chain), not prefixed.
+      - AWS_REGION=${AWS_REGION:-us-east-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - CODERUNTIME_METRICS_ENABLED=true
       - CODERUNTIME_TRACING_SERVICE_NAME=queue-manager
       - QUEUE_MANAGER_PORT=8081
-    depends_on:
-      postgres:
-        condition: service_healthy
-      nats:
-        condition: service_started
+    # No depends_on: mysql/nats are profiled (off by default) and the clients
+    # retry; under SQS the queue-manager uses neither for its core path.
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
@@ -90,17 +150,44 @@ services:
       context: .
       dockerfile: docker/Dockerfile.worker
     environment:
-      - CODERUNTIME_DATABASE_HOST=postgres
-      - CODERUNTIME_DATABASE_PORT=5432
-      - CODERUNTIME_DATABASE_USER=coderuntime
-      - CODERUNTIME_DATABASE_PASSWORD=coderuntime123
-      - CODERUNTIME_DATABASE_NAME=coderuntime
-      - CODERUNTIME_DATABASE_SSL_MODE=disable
-      - CODERUNTIME_REDIS_HOST=redis
-      - CODERUNTIME_REDIS_PORT=6379
+      - CODERUNTIME_DATABASE_HOST=${DATABASE_HOST:-mysql}
+      - CODERUNTIME_DATABASE_PORT=${DATABASE_PORT:-3306}
+      - CODERUNTIME_DATABASE_USER=${DATABASE_USER:-coderuntime}
+      - CODERUNTIME_DATABASE_PASSWORD=${DATABASE_PASSWORD:-coderuntime123}
+      - CODERUNTIME_DATABASE_NAME=${DATABASE_NAME:-coderuntime}
+      - CODERUNTIME_DATABASE_SSL_MODE=${DATABASE_SSL_MODE:-disable}
+      - CODERUNTIME_REDIS_HOST=${REDIS_HOST:-redis}
+      - CODERUNTIME_REDIS_PORT=${REDIS_PORT:-6379}
+      - CODERUNTIME_REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - CODERUNTIME_REDIS_TLS_ENABLED=${REDIS_TLS_ENABLED:-false}
       - CODERUNTIME_NATS_URL=nats://nats:4222
-      - CODERUNTIME_WORKER_COUNT=4
-      - CODERUNTIME_WORKER_CONCURRENCY=4
+      # Job queue: defaults to NATS. Set QUEUE_PROVIDER=sqs + SQS_* URLs (e.g. in
+      # .env) to use AWS SQS; credentials come from the instance/task IAM role.
+      - CODERUNTIME_QUEUE_PROVIDER=${QUEUE_PROVIDER:-nats}
+      - CODERUNTIME_SQS_REGION=${SQS_REGION:-us-east-1}
+      - CODERUNTIME_SQS_JOBS_QUEUE_URL=${SQS_JOBS_QUEUE_URL:-}
+      - CODERUNTIME_SQS_PRIORITY_QUEUE_URL=${SQS_PRIORITY_QUEUE_URL:-}
+      - CODERUNTIME_SQS_START_QUEUE_URL=${SQS_START_QUEUE_URL:-}
+      - CODERUNTIME_SQS_DLQ_QUEUE_URL=${SQS_DLQ_QUEUE_URL:-}
+      # Batch-completion webhook delivery + retry (worker fires; api callback is single-shot).
+      - CODERUNTIME_WEBHOOK_MAX_RETRIES=${WEBHOOK_MAX_RETRIES:-3}
+      - CODERUNTIME_WEBHOOK_RETRY_DELAY=${WEBHOOK_RETRY_DELAY:-10s}
+      - CODERUNTIME_WEBHOOK_RETRY_BACKOFF=${WEBHOOK_RETRY_BACKOFF:-2.0}
+      - CODERUNTIME_WEBHOOK_RETRY_MAX_DELAY=${WEBHOOK_RETRY_MAX_DELAY:-5m}
+      - CODERUNTIME_WEBHOOK_TIMEOUT=${WEBHOOK_TIMEOUT:-10s}
+      # Batch submission limit (POST /batches)
+      - CODERUNTIME_BATCH_MAX_SIZE=${BATCH_MAX_SIZE:-20}
+      # AWS credentials for SQS (QUEUE_PROVIDER=sqs). For LOCAL testing only —
+      # in prod leave these empty and use an IAM task/instance role. Standard
+      # AWS_* names (read by the SDK's default credential chain), not prefixed.
+      - AWS_REGION=${AWS_REGION:-us-east-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      # In-process workers (NATS subscriptions) and per-worker sandbox
+      # concurrency, both PER container. Container count is WORKER_REPLICAS below.
+      - CODERUNTIME_WORKER_COUNT=${WORKER_COUNT:-4}
+      - CODERUNTIME_WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-4}
       - CODERUNTIME_DOCKER_HOST=unix:///var/run/docker.sock
       - CODERUNTIME_WORKER_TMP_DIR=/tmp/sandbox
       - CODERUNTIME_WORKER_JOB_TIMEOUT=30s
@@ -115,53 +202,53 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp/sandbox:/tmp/sandbox
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      nats:
-        condition: service_started
+      # mysql/redis/nats are profiled (off by default) and their clients retry.
       api:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - coderuntime
     deploy:
-      replicas: 2
+      # Number of worker CONTAINERS. This is the count you see in `docker ps`.
+      replicas: ${WORKER_REPLICAS:-2}
 
-  postgres:
-    image: postgres:16-alpine
+  mysql:
+    # Local-only DB. Off by default — prod points at AWS RDS via DATABASE_HOST.
+    # Start it for local dev with:  docker compose --profile localinfra up -d
+    profiles: ["localinfra"]
+    image: mysql:8.0
     environment:
-      POSTGRES_USER: coderuntime
-      POSTGRES_PASSWORD: coderuntime123
-      POSTGRES_DB: coderuntime
-      PGDATA: /var/lib/postgresql/data/pgdata
+      MYSQL_DATABASE: coderuntime
+      MYSQL_USER: coderuntime
+      MYSQL_PASSWORD: coderuntime123
+      MYSQL_ROOT_PASSWORD: rootpass123
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
       - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U coderuntime -d coderuntime"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-prootpass123"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 15s
+      retries: 10
+      start_period: 30s
     ports:
-      - "5432:5432"
+      # Host 3307 → container 3306 to avoid clashing with a local mysqld on 3306.
+      # Internal services connect via the Docker network (mysql:3306), unaffected.
+      - "3307:3306"
     networks:
       - coderuntime
     command: >
-      postgres
-        -c max_connections=200
-        -c shared_buffers=256MB
-        -c effective_cache_size=1GB
-        -c maintenance_work_mem=64MB
-        -c checkpoint_completion_target=0.9
-        -c wal_buffers=16MB
-        -c default_statistics_target=100
-        -c random_page_cost=1.1
-        -c log_min_duration_statement=500
+      --max_connections=200
+      --innodb_buffer_pool_size=256M
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_0900_ai_ci
+      --slow_query_log=1
+      --long_query_time=0.5
 
   redis:
+    # Local-only cache. Off by default — prod points at AWS ElastiCache via
+    # REDIS_HOST. Start it for local dev with:  docker compose --profile localinfra up -d
+    profiles: ["localinfra"]
     image: redis:7-alpine
     command: >
       redis-server
@@ -189,6 +276,10 @@ services:
       - coderuntime
 
   nats:
+    # Only needed for QUEUE_PROVIDER=nats. Off by default; started via the
+    # `natsinfra` profile (the Makefile enables it automatically for the nats
+    # provider). Under SQS, NATS does not run.
+    profiles: ["natsinfra"]
     image: nats:2.10-alpine
     command:
       - "-js"
@@ -273,7 +364,7 @@ services:
       - coderuntime
 
 volumes:
-  postgres_data:
+  mysql_data:
     driver: local
   redis_data:
     driver: local

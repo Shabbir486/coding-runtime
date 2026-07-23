@@ -124,7 +124,7 @@ heading "Starting Services"
 cd "${PROJECT_ROOT}"
 
 log "Pulling infrastructure images..."
-${DC} "${COMPOSE_FILES[@]}" pull postgres redis nats 2>&1 | tee -a "${LOG_FILE}"
+${DC} "${COMPOSE_FILES[@]}" pull mysql redis nats 2>&1 | tee -a "${LOG_FILE}"
 
 if [ "${PULL_ONLY}" = "true" ]; then
     log "Pulling API, Worker and Queue Manager images from ${REGISTRY}..."
@@ -156,7 +156,7 @@ wait_healthy() {
     warn "${svc} did not become healthy within ${max}s — continuing anyway"
 }
 
-wait_healthy postgres 120
+wait_healthy mysql 120
 wait_healthy redis 60
 wait_healthy api 90
 
@@ -205,7 +205,7 @@ cat <<EOF
   │  Jaeger (traces)   http://localhost:16686                    │
   │  NATS monitor      http://localhost:8222                     │
   │                                                              │
-  │  PostgreSQL        localhost:5432  (coderuntime/coderuntime123)│
+  │  MySQL             localhost:3306  (coderuntime/coderuntime123)│
   │  Redis             localhost:6379                            │
   ├─────────────────────────────────────────────────────────────┤
   │  Stop:    docker compose down                                │

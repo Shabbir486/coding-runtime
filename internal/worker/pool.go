@@ -7,12 +7,13 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/cache"
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
-	"github.com/mdshabbir-ali/code-runtime/internal/database"
-	"github.com/mdshabbir-ali/code-runtime/internal/metrics"
-	"github.com/mdshabbir-ali/code-runtime/internal/runtime"
-	"github.com/mdshabbir-ali/code-runtime/internal/sandbox"
+	"github.com/revature/corems-code-executor/internal/cache"
+	"github.com/revature/corems-code-executor/internal/config"
+	"github.com/revature/corems-code-executor/internal/database"
+	"github.com/revature/corems-code-executor/internal/metrics"
+	"github.com/revature/corems-code-executor/internal/runtime"
+	"github.com/revature/corems-code-executor/internal/sandbox"
+	"github.com/revature/corems-code-executor/internal/webhook"
 
 	"github.com/nats-io/nats.go"
 )
@@ -30,6 +31,8 @@ type PoolDeps struct {
 	Logger    *zap.Logger
 	Metrics   *metrics.Metrics
 	Cfg       *config.WorkerConfig
+	// WebhookRetry configures batch-completion webhook delivery retries.
+	WebhookRetry webhook.RetryConfig
 }
 
 // Pool owns a fixed set of Workers and manages their lifecycle.
@@ -119,8 +122,9 @@ func (p *Pool) Scale(ctx context.Context, n int) error {
 				LangCache: p.deps.LangCache,
 				NATSConn:  p.deps.NATSConn,
 				Logger:    p.deps.Logger,
-				Metrics:   p.deps.Metrics,
-				Cfg:       p.deps.Cfg,
+				Metrics:      p.deps.Metrics,
+				Cfg:          p.deps.Cfg,
+				WebhookRetry: p.deps.WebhookRetry,
 			})
 			p.workers = append(p.workers, w)
 

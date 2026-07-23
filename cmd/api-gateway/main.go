@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,15 +11,19 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	api "github.com/mdshabbir-ali/code-runtime/internal/api"
-	"github.com/mdshabbir-ali/code-runtime/internal/api/handlers"
-	"github.com/mdshabbir-ali/code-runtime/internal/api/routes"
-	"github.com/mdshabbir-ali/code-runtime/internal/cache"
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
-	"github.com/mdshabbir-ali/code-runtime/internal/database"
-	"github.com/mdshabbir-ali/code-runtime/internal/metrics"
-	"github.com/mdshabbir-ali/code-runtime/internal/queue"
-	"github.com/mdshabbir-ali/code-runtime/internal/tracing"
+	api "github.com/revature/corems-code-executor/internal/api"
+	"github.com/revature/corems-code-executor/internal/api/handlers"
+	"github.com/revature/corems-code-executor/internal/api/routes"
+	"github.com/revature/corems-code-executor/internal/batchproc"
+	"github.com/revature/corems-code-executor/internal/cache"
+	"github.com/revature/corems-code-executor/internal/config"
+	"github.com/revature/corems-code-executor/internal/database"
+	"github.com/revature/corems-code-executor/internal/metrics"
+	"github.com/revature/corems-code-executor/internal/models"
+	"github.com/revature/corems-code-executor/internal/queue"
+	qsqs "github.com/revature/corems-code-executor/internal/queue/sqs"
+	"github.com/revature/corems-code-executor/internal/tracing"
+	"github.com/revature/corems-code-executor/internal/webhook"
 )
 
 func main() {
@@ -47,14 +52,14 @@ func main() {
 		}
 	}()
 
-	// ---- PostgreSQL ----------------------------------------------------------
+	// ---- MySQL ----------------------------------------------------------
 	db, err := database.Connect(cfg, log)
 	if err != nil {
-		log.Fatal("failed to connect to PostgreSQL", zap.Error(err))
+		log.Fatal("failed to connect to MySQL", zap.Error(err))
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			log.Warn("postgres close error", zap.Error(err))
+			log.Warn("mysql close error", zap.Error(err))
 		}
 	}()
 
@@ -80,16 +85,44 @@ func main() {
 	subCache := cache.NewSubmissionCache(redisClient)
 	langCache := cache.NewLanguageCache(redisClient)
 
+	// Flush the language cache on every startup so a redeploy never serves a
+	// stale list (e.g. after the active-language policy or a new language changes
+	// in DefaultLanguages()). Automated per redeploy — no manual invalidation.
+	{
+		allLangs := models.DefaultLanguages()
+		ids := make([]int, 0, len(allLangs))
+		for _, l := range allLangs {
+			ids = append(ids, l.ID)
+		}
+		if err := langCache.InvalidateAll(context.Background(), ids); err != nil {
+			log.Warn("startup language cache flush failed", zap.Error(err))
+		} else {
+			log.Info("language cache flushed on startup", zap.Int("languages", len(ids)))
+		}
+	}
+
 	// ---- Metrics -------------------------------------------------------------
 	queueMetrics := metrics.New(cfg.Metrics.Namespace)
 	apiMetrics := metrics.NewAPIMetrics(cfg.Metrics.Namespace)
 
-	// ---- NATS ----------------------------------------------------------------
-	publisher, err := queue.NewNATSPublisher(cfg, log, queueMetrics)
+	// ---- Job queue publisher (NATS or SQS, by CODERUNTIME_QUEUE_PROVIDER) -----
+	publisher, err := newPublisher(cfg, log, queueMetrics)
 	if err != nil {
-		log.Fatal("failed to connect to NATS", zap.Error(err))
+		log.Fatal("failed to init queue publisher", zap.Error(err))
 	}
 	defer publisher.Close()
+
+	// ---- Webhook dispatcher (shared payload assembly + delivery) -------------
+	dispatcher := webhook.NewDispatcher(repos.Batches, repos.Webhooks, nil, webhook.RetryConfig{
+		MaxRetries: cfg.Webhook.MaxRetries,
+		Delay:      cfg.Webhook.RetryDelay,
+		Backoff:    cfg.Webhook.RetryBackoff,
+		MaxDelay:   cfg.Webhook.RetryMaxDelay,
+		Timeout:    cfg.Webhook.Timeout,
+	}, log)
+
+	// ---- Batch starter (fans submissions out only when the batch is started) -
+	starter := batchproc.NewStarter(repos.Batches, repos.Languages, publisher, subCache, log)
 
 	// ---- Handlers ------------------------------------------------------------
 	handlerBundle := &routes.Handlers{
@@ -109,6 +142,16 @@ func main() {
 		),
 		Status: handlers.NewStatusHandler(db, redisClient, log),
 		Auth:   handlers.NewAuthHandler(repos.Users, cfg, log),
+		Batch: handlers.NewBatchHandler(handlers.BatchHandlerDeps{
+			BatchRepo:    repos.Batches,
+			WebhookRepo:  repos.Webhooks,
+			Starter:      starter,
+			Dispatcher:   dispatcher,
+			Metrics:      apiMetrics,
+			MaxBatchSize: cfg.Batch.MaxSize,
+			Log:          log,
+		}),
+		Webhook: handlers.NewWebhookHandler(repos.Webhooks, log),
 	}
 
 	// ---- Server --------------------------------------------------------------
@@ -142,6 +185,23 @@ func main() {
 	}
 
 	log.Info("api-gateway stopped cleanly")
+}
+
+// newPublisher selects the job-queue publisher based on cfg.QueueProvider:
+// "sqs" for AWS SQS, anything else (default "nats") for NATS JetStream.
+func newPublisher(cfg *config.Config, log *zap.Logger, m *metrics.Metrics) (queue.Publisher, error) {
+	if cfg.QueueProvider == queue.ProviderSQS {
+		client, err := qsqs.NewClient(context.Background(), cfg.SQS)
+		if err != nil {
+			return nil, fmt.Errorf("sqs publisher: %w", err)
+		}
+		log.Info("queue provider: sqs",
+			zap.String("jobs_queue", cfg.SQS.JobsQueueURL),
+			zap.String("priority_queue", cfg.SQS.PriorityQueueURL))
+		return qsqs.NewPublisher(client, cfg.SQS, log), nil
+	}
+	log.Info("queue provider: nats")
+	return queue.NewNATSPublisher(cfg, log, m)
 }
 
 // buildLogger creates a production-grade Zap logger.

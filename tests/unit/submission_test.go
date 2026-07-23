@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
-	"github.com/mdshabbir-ali/code-runtime/internal/sandbox"
+	"github.com/revature/corems-code-executor/internal/models"
+	"github.com/revature/corems-code-executor/internal/sandbox"
 )
 
 // ---------------------------------------------------------------------------

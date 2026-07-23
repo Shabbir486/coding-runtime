@@ -1,0 +1,225 @@
+---
+# Settings shared by both the API gateway and worker. Mounted via envFrom in
+# both deployments. Keys must be prefixed with CODERUNTIME_ because the Go
+# binary loads env vars through Viper with SetEnvPrefix("CODERUNTIME");
+# unprefixed keys are silently ignored.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: common-config
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: coderuntime
+    app.kubernetes.io/component: shared
+data:
+  CODERUNTIME_DATABASE_PORT: "3306"
+  CODERUNTIME_DATABASE_NAME: "coderuntime"
+  # AWS Aurora/RDS MySQL. skip-verify = TLS in transit without the RDS CA bundle.
+  # Switch to "true" once the Amazon RDS CA is in the image's trust store.
+  CODERUNTIME_DATABASE_SSL_MODE: "skip-verify"
+  CODERUNTIME_REDIS_PORT: "6379"
+  # In-cluster Redis StatefulSet (no TLS). "true" for ElastiCache Serverless.
+  CODERUNTIME_REDIS_TLS_ENABLED: "false"
+  CODERUNTIME_LOG_LEVEL: "info"
+  CODERUNTIME_LOG_FORMAT: "json"
+
+  # ---- Job queue: Amazon SQS (values from .env, account 768054003064) -------
+  # All three services (api publisher, worker consumer, queue-manager DLQ
+  # drainer) use SQS. The in-cluster NATS StatefulSet is NOT needed in this mode.
+  # Queue URLs are not secret; AWS credentials are (see create-secrets.sh / IRSA).
+  CODERUNTIME_QUEUE_PROVIDER: "sqs"
+  CODERUNTIME_SQS_REGION: "ap-southeast-2"
+  CODERUNTIME_SQS_JOBS_QUEUE_URL: "https://sqs.ap-southeast-2.amazonaws.com/768054003064/code-submission-processing-queue"
+  CODERUNTIME_SQS_PRIORITY_QUEUE_URL: ""
+  CODERUNTIME_SQS_START_QUEUE_URL: "https://sqs.ap-southeast-2.amazonaws.com/768054003064/code-submission-completed-queue"
+  CODERUNTIME_SQS_DLQ_QUEUE_URL: ""
+  CODERUNTIME_SQS_WAIT_TIME_SECONDS: "20"
+  CODERUNTIME_SQS_VISIBILITY_TIMEOUT: "330"
+  # Concurrent SQS messages processed per worker pod = concurrent sandboxes.
+  # Match WORKER_CONCURRENCY (3) so the consumer never pulls more jobs than the
+  # pod's CPU budget can run on m7i-flex.large. Scale throughput via KEDA pods.
+  CODERUNTIME_SQS_MAX_CONCURRENCY: "3"
+
+---
+# API-gateway-specific settings.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/component: api
+data:
+  CODERUNTIME_SERVER_PORT: "8002"
+  CODERUNTIME_SERVER_READ_TIMEOUT: "30s"
+  # WRITE_TIMEOUT must EXCEED the wait=true poll window (waitTimeout=120s in
+  # submission.go) or the HTTP server resets long-held wait connections at 30s,
+  # which clients see as "transport/network" errors. 150s leaves a 30s margin.
+  CODERUNTIME_SERVER_WRITE_TIMEOUT: "150s"
+  CODERUNTIME_SERVER_IDLE_TIMEOUT: "150s"
+
+  CODERUNTIME_DATABASE_MAX_OPEN_CONNS: "50"
+  CODERUNTIME_DATABASE_MAX_IDLE_CONNS: "10"
+  CODERUNTIME_DATABASE_CONN_MAX_LIFETIME: "300s"
+
+  CODERUNTIME_REDIS_DB: "0"
+
+  CODERUNTIME_JWT_ACCESS_TOKEN_EXP: "24h"
+  # Rate limiting — per-route-class budgets (matches .env / docker-compose).
+  # The old single CODERUNTIME_RATE_LIMIT_LIMIT=200 fallback throttled the
+  # cluster to 200/min; these per-class limits are the real knobs.
+  CODERUNTIME_RATE_LIMIT_ENABLED: "false"      # disabled (load testing / trusted internal traffic)
+  CODERUNTIME_RATE_LIMIT_LIMIT: "200"          # fallback only (unused when classes set)
+  CODERUNTIME_RATE_LIMIT_PERIOD: "60s"
+  CODERUNTIME_RATE_LIMIT_READ_LIMIT: "10000"
+  CODERUNTIME_RATE_LIMIT_READ_PERIOD: "60s"
+  CODERUNTIME_RATE_LIMIT_WRITE_LIMIT: "10000"
+  CODERUNTIME_RATE_LIMIT_WRITE_PERIOD: "60s"
+  CODERUNTIME_RATE_LIMIT_AUTH_LIMIT: "60"
+  CODERUNTIME_RATE_LIMIT_AUTH_PERIOD: "60s"
+  # Internal service API key IDs that bypass limits entirely (comma-separated).
+  CODERUNTIME_RATE_LIMIT_TRUSTED_API_KEYS: ""
+
+  CODERUNTIME_METRICS_ENABLED: "true"
+  CODERUNTIME_TRACING_SERVICE_NAME: "api-gateway"
+
+  CODERUNTIME_CORS_ALLOWED_ORIGINS: "https://app.coderuntime.io"
+  CODERUNTIME_CORS_ALLOWED_METHODS: "GET,POST,PUT,DELETE,OPTIONS"
+  CODERUNTIME_CORS_MAX_AGE: "86400"
+
+---
+# Worker-specific settings.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: worker-config
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/component: worker
+data:
+  # Latency-tuned for m7i-flex.large (2 vCPU, ~2 worker pods/node). Each sandbox
+  # is capped at ~0.5 core; concurrency 3 keeps a pod's sandboxes within its CPU
+  # budget instead of oversubscribing 2 cores with 8 jobs. Scale OUT (more pods)
+  # via KEDA rather than packing each pod. Raise these only on bigger nodes.
+  CODERUNTIME_WORKER_COUNT: "3"
+  # LOCAL (Docker-out-of-Docker): the worker asks the HOST Docker daemon to
+  # bind-mount this path into each sandbox, so it must be a real host path that
+  # the worker container ALSO sees at the SAME path. kind mounts host /tmp/sandbox
+  # → node /tmp/sandbox, and the worker hostPath-mounts /tmp/sandbox → /tmp/sandbox.
+  # (On EKS this is /sandbox-host, an emptyDir shared with the dind sidecar.)
+  CODERUNTIME_WORKER_TMP_DIR: "/tmp/sandbox"
+  CODERUNTIME_WORKER_JOB_TIMEOUT: "30s"
+  CODERUNTIME_DOCKER_CONTAINER_TIMEOUT: "30s"
+  CODERUNTIME_DOCKER_NETWORK_MODE: "none"
+  # Per-attempt webhook HTTP timeout. Must comfortably exceed how long the
+  # receiver takes to respond, or a slow-but-successful receiver looks like a
+  # failure to us (and gets duplicate retries). Default is only 10s.
+  CODERUNTIME_WEBHOOK_TIMEOUT: "120s"
+
+  CODERUNTIME_TRACING_SERVICE_NAME: "worker"
+  # Per-worker sandbox concurrency. Cluster-wide concurrency =
+  # WORKER_COUNT x WORKER_CONCURRENCY x (worker replicas).
+  CODERUNTIME_WORKER_CONCURRENCY: "3"
+  # CRITICAL for autoscaling: keep each worker pod's DB pool SMALL so a large
+  # KEDA-scaled fleet doesn't exhaust the database's max_connections. With 100
+  # workers, 5 conns each = 500 — still front this with RDS Proxy in prod.
+  # (Observed: 19 workers x 25 conns exhausted a single MySQL and crash-looped
+  # the surplus pods.) Workers only do short token look-ups + result writes.
+  CODERUNTIME_DATABASE_MAX_OPEN_CONNS: "3"
+  CODERUNTIME_DATABASE_MAX_IDLE_CONNS: "1"
+  CODERUNTIME_DATABASE_CONN_MAX_LIFETIME: "300s"
+
+---
+# Queue-manager-specific settings. In SQS mode it runs the DLQ drainer and
+# exposes /health + /metrics on QUEUE_MANAGER_PORT. Queue provider + SQS URLs
+# come from common-config.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: queue-manager-config
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: queue-manager
+    app.kubernetes.io/component: queue
+data:
+  QUEUE_MANAGER_PORT: "8083"
+  CODERUNTIME_TRACING_SERVICE_NAME: "queue-manager"
+
+---
+# MySQL database name (consumed by the optional in-cluster mysql-statefulset).
+# Server tuning is passed via container args in mysql-statefulset.yaml.
+# Not needed when using AWS RDS.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: mysql
+    app.kubernetes.io/component: database
+data:
+  MYSQL_DATABASE: "coderuntime"
+
+---
+# Redis configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+data:
+  redis.conf: |
+    # Network
+    bind 0.0.0.0
+    protected-mode yes
+    port 6379
+    tcp-backlog 511
+    timeout 300
+    tcp-keepalive 60
+
+    # General
+    daemonize no
+    loglevel notice
+    databases 16
+
+    # Snapshotting
+    save 900 1
+    save 300 10
+    save 60 10000
+    stop-writes-on-bgsave-error yes
+    rdbcompression yes
+    rdbchecksum yes
+    dbfilename dump.rdb
+    dir /data
+
+    # Replication
+    replica-serve-stale-data yes
+    replica-read-only yes
+
+    # Append only file
+    appendonly yes
+    appendfilename "appendonly.aof"
+    appendfsync everysec
+    no-appendfsync-on-rewrite no
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+
+    # Memory
+    maxmemory 512mb
+    maxmemory-policy allkeys-lru
+    maxmemory-samples 5
+
+    # Lazy freeing
+    lazyfree-lazy-eviction yes
+    lazyfree-lazy-expire yes
+    lazyfree-lazy-server-del yes
+
+    # Slow log
+    slowlog-log-slower-than 10000
+    slowlog-max-len 128
+# NATS ConfigMap intentionally removed — this is the SQS-mode local deployment.

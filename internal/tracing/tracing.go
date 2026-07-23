@@ -3,6 +3,7 @@ package tracing
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -12,7 +13,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
+	"github.com/revature/corems-code-executor/internal/config"
 )
 
 // Provider wraps the OpenTelemetry TracerProvider.
@@ -31,10 +32,15 @@ func Init(cfg *config.Config, log *zap.Logger) (*Provider, error) {
 
 	ctx := context.Background()
 
+	// otlptracehttp.WithEndpoint expects "host:port" WITHOUT a scheme. A full
+	// URL like "http://jaeger:4318" otherwise gets mangled into
+	// "http://http:%2F%2Fjaeger:4318/v1/traces". Strip the scheme and let an
+	// http:// endpoint imply insecure (plaintext) transport.
+	endpoint, insecure := parseOTLPEndpoint(cfg.Tracing.Endpoint, cfg.Tracing.Insecure)
 	httpOpts := []otlptracehttp.Option{
-		otlptracehttp.WithEndpoint(cfg.Tracing.Endpoint),
+		otlptracehttp.WithEndpoint(endpoint),
 	}
-	if cfg.Tracing.Insecure {
+	if insecure {
 		httpOpts = append(httpOpts, otlptracehttp.WithInsecure())
 	}
 
@@ -92,4 +98,20 @@ func (p *Provider) Shutdown(ctx context.Context) error {
 	}
 	p.log.Info("OpenTelemetry tracer shut down")
 	return nil
+}
+
+// parseOTLPEndpoint normalises a tracing endpoint into the "host:port" form
+// otlptracehttp.WithEndpoint requires (no scheme, no trailing slash). An
+// http:// scheme forces insecure transport; https:// keeps the configured
+// setting; a bare host:port is returned unchanged.
+func parseOTLPEndpoint(raw string, insecure bool) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	switch {
+	case strings.HasPrefix(raw, "http://"):
+		return strings.TrimRight(strings.TrimPrefix(raw, "http://"), "/"), true
+	case strings.HasPrefix(raw, "https://"):
+		return strings.TrimRight(strings.TrimPrefix(raw, "https://"), "/"), insecure
+	default:
+		return strings.TrimRight(raw, "/"), insecure
+	}
 }

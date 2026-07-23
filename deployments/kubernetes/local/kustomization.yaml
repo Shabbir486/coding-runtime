@@ -1,0 +1,26 @@
+# LOCAL (kind + SQS) deployment — self-contained, no ECR image rewrite.
+#
+# Secrets are NOT listed here (they carry real .env values) — setup.sh creates
+# them imperatively. Apply order is handled by kustomize (namespaces/SAs first).
+#
+#   Preferred:  ./setup.sh            # full one-command bring-up (kind + KEDA)
+#   Manual:     kubectl apply -k .    # workloads only (cluster + secrets + KEDA
+#                                     #   operator must already exist)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: coderuntime
+
+resources:
+  - namespace.yaml        # ns (privileged PSA) + SAs + RBAC + PriorityClasses + quota
+  - storageclass.yaml     # fast-ssd -> kind local-path
+  - configmap.yaml        # common/api/worker/queue/mysql/redis config (SQS mode)
+  - redis.yaml            # in-cluster Redis StatefulSet + Service
+  - mysql.yaml            # in-cluster MySQL StatefulSet + Service
+  - api-gateway.yaml      # api Deployment + Service (ClusterIP) + HPA
+  - queue-manager.yaml    # queue-manager Deployment + Service + HPA
+  - worker.yaml           # worker Deployment (DooD) + Service + PDB
+  - keda-scaledobject.yaml # KEDA ScaledObject + static-creds TriggerAuthentication
+
+# Images are the locally-built ghcr.io/coderuntime/* :latest tags that setup.sh
+# loads into kind — intentionally NOT rewritten to ECR (that's the eks/ overlay).

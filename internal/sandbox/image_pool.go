@@ -32,22 +32,44 @@ type ImagePool struct {
 	// pulled image is then re-tagged to its bare local name so callers can keep
 	// referencing code-runtime-<lang>:latest.
 	registry string
-	// registryAuth is the base64-encoded X-Registry-Auth value used for private
-	// registries (e.g. ECR). Empty for public/unauthenticated registries.
+	// registryAuth is a STATIC base64-encoded X-Registry-Auth value. It is only a
+	// fallback: when the registry is ECR, ecrAuth fetches fresh tokens via IRSA
+	// (self-refreshing, no static secret needed). Empty for public registries.
 	registryAuth string
+	// ecrAuth, when non-nil (registry is an ECR host), provides fresh ECR
+	// X-Registry-Auth tokens on demand via the AWS SDK (IRSA), so pulls never
+	// fail with "authorization token has expired" and no CronJob/restart is needed.
+	ecrAuth *ecrAuthProvider
 }
 
 // NewImagePool constructs an ImagePool backed by the provided Docker client.
 // registry and registryAuth may be empty, in which case images are pulled by
-// their bare name (suitable for public images or a pre-warmed host).
+// their bare name (suitable for public images or a pre-warmed host). When
+// registry is an ECR host, tokens are fetched dynamically via IRSA and
+// registryAuth is used only as a fallback.
 func NewImagePool(dockerClient *client.Client, registry, registryAuth string, logger *zap.Logger) *ImagePool {
+	reg := strings.TrimRight(registry, "/")
 	return &ImagePool{
 		client:       dockerClient,
 		images:       make(map[string]bool),
 		logger:       logger,
-		registry:     strings.TrimRight(registry, "/"),
+		registry:     reg,
 		registryAuth: registryAuth,
+		ecrAuth:      newECRAuthProvider(reg, logger),
 	}
+}
+
+// pullAuth returns the X-Registry-Auth to use for a private-registry pull:
+// a fresh IRSA-fetched ECR token when available, otherwise the static fallback.
+func (p *ImagePool) pullAuth(ctx context.Context) string {
+	if p.ecrAuth != nil {
+		if auth, err := p.ecrAuth.Get(ctx); err != nil {
+			p.logger.Warn("ecr auth fetch failed; using static fallback", zap.Error(err))
+		} else {
+			return auth
+		}
+	}
+	return p.registryAuth
 }
 
 // resolvePullRef maps a locally-referenced image to the reference that should
@@ -97,8 +119,8 @@ func (p *ImagePool) PullIfMissing(ctx context.Context, img string) error {
 
 	opts := image.PullOptions{}
 	// Auth is only relevant when pulling from the configured private registry.
-	if pullRef != img && p.registryAuth != "" {
-		opts.RegistryAuth = p.registryAuth
+	if pullRef != img {
+		opts.RegistryAuth = p.pullAuth(ctx)
 	}
 
 	reader, err := p.client.ImagePull(ctx, pullRef, opts)

@@ -7,7 +7,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
+	"github.com/revature/corems-code-executor/internal/config"
 )
 
 // SecureHeaders sets recommended HTTP security response headers.

@@ -1,0 +1,11 @@
+# LOCAL StorageClass: the manifests request "fast-ssd" (the prod gp3 name), but
+# kind has no EBS. Alias it to kind's built-in local-path provisioner so the
+# Redis/MySQL PVCs bind. (kind also ships a "standard" class used by MySQL's
+# backup PVC — that one already exists out of the box.)
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-ssd
+provisioner: rancher.io/local-path
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete

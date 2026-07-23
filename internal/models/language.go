@@ -53,6 +53,7 @@ const (
 	LanguageMySQL          = 38
 	LanguagePostgreSQL     = 39
 	LanguageMongoDB        = 40
+	LanguageWeb            = 41 // HTML/CSS/JS combined (jsdom runner)
 )
 
 // Language represents a supported programming language and its execution environment.
@@ -85,7 +86,7 @@ func compilePtr(s string) *string {
 // Images use official public Docker Hub images that the worker pre-warms on startup.
 // Languages without a readily available public image are marked IsActive: false.
 func DefaultLanguages() []Language {
-	return []Language{
+	langs := []Language{
 		{
 			ID:         LanguageBash,
 			Name:       "Bash (5.2)",
@@ -555,7 +556,37 @@ func DefaultLanguages() []Language {
 			IsDatabase: true,
 			DBType:     "mongodb",
 		},
+		{
+			ID:         LanguageWeb,
+			Name:       "Web (HTML/CSS/JS)",
+			Version:    "1.0",
+			SourceFile: "index.html",
+			RunCommand: "node /runner/run.js index.html",
+			Image:      "code-runtime-web:latest",
+			IsActive:   true,
+			MaxMemory:  262144, // 256 MB
+			MaxCPUTime: 10.0,
+		},
 	}
+
+	// Central active-language policy: only these are enabled for execution;
+	// every other language is still seeded but inactive (is_active=false). This
+	// overrides the per-entry IsActive above so the enabled set lives in one place.
+	active := map[int]bool{
+		LanguageC:          true,
+		LanguageCPP:        true,
+		LanguageJava:       true,
+		LanguageJavaScript: true,
+		LanguageTypeScript: true,
+		LanguagePython3:    true,
+		LanguageMySQL:      true,
+		LanguagePostgreSQL: true,
+		LanguageWeb:        true,
+	}
+	for i := range langs {
+		langs[i].IsActive = active[langs[i].ID]
+	}
+	return langs
 }
 
 // SeedLanguages upserts all default languages so that code changes to

@@ -9,12 +9,34 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
+	"github.com/revature/corems-code-executor/internal/config"
 )
 
 // SubmissionMessage is the payload published to NATS for each submission.
 type SubmissionMessage struct {
 	Token string `json:"token"`
+}
+
+// BatchStartMessage is the START_BATCH_PROCESSING event payload. The Assessment
+// Service publishes it to the start queue AFTER it has committed its own
+// submission/token persistence; the runtime consumes it and only then begins
+// execution for the batch.
+//
+// Both snake_case (batch_id) and camelCase (batchId) are accepted so producers
+// in either convention interoperate. The "event"/"type" fields are optional and
+// informational. Use ID() to read the batch id.
+type BatchStartMessage struct {
+	Event        string `json:"event,omitempty"`
+	BatchID      string `json:"batch_id,omitempty"`
+	BatchIDCamel string `json:"batchId,omitempty"`
+}
+
+// ID returns the batch id from whichever key the producer used.
+func (m BatchStartMessage) ID() string {
+	if m.BatchID != "" {
+		return m.BatchID
+	}
+	return m.BatchIDCamel
 }
 
 // LegacyPublisher is the simple token-only publishing interface used by the

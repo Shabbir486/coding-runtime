@@ -10,9 +10,9 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
-	"github.com/mdshabbir-ali/code-runtime/internal/metrics"
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
+	"github.com/revature/corems-code-executor/internal/config"
+	"github.com/revature/corems-code-executor/internal/metrics"
+	"github.com/revature/corems-code-executor/internal/models"
 )
 
 const (
@@ -35,6 +35,8 @@ type Publisher interface {
 	PublishPriorityJob(ctx context.Context, job *models.ExecutionJob) error
 	// PublishBatch sends multiple jobs in a single round-trip using async publish.
 	PublishBatch(ctx context.Context, jobs []*models.ExecutionJob) error
+	// Close releases any underlying connection / client resources.
+	Close()
 }
 
 // NATSPublisher implements Publisher using NATS JetStream.

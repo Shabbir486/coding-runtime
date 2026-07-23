@@ -10,11 +10,12 @@ server:
 
 database:
   host: "localhost"
-  port: 5432
+  port: 3306
   user: "coderuntime"
   password: "coderuntime123"
-  dbname: "coderuntime"
-  sslmode: "disable"
+  name: "coderuntime"
+  # MySQL TLS (go-sql-driver `tls`): disable | true | skip-verify | preferred
+  ssl_mode: "disable"
   max_open_conns: 25
   max_idle_conns: 10
   conn_max_lifetime: 300s
@@ -25,12 +26,38 @@ redis:
   password: ""
   db: 0
   pool_size: 20
+  # Enable for AWS ElastiCache (Valkey/Redis) Serverless — requires in-transit TLS.
+  tls_enabled: false
 
 nats:
   url: "nats://localhost:4222"
   subject: "submissions"
   max_reconnects: 10
   reconnect_wait: 2s
+
+# Job-queue backend: "nats" (local dev) or "sqs" (AWS). Defaults to nats.
+queue_provider: "nats"
+
+# Amazon SQS (only used when queue_provider=sqs). Credentials come from the
+# standard AWS chain (IAM role / env / profile) — never put keys here.
+sqs:
+  region: "us-east-1"
+  endpoint: ""              # set to an ElasticMQ/LocalStack URL for local SQS
+  jobs_queue_url: ""
+  priority_queue_url: ""
+  start_queue_url: ""       # START_BATCH_PROCESSING events (set by Assessment Service)
+  dlq_queue_url: ""
+  wait_time_seconds: 20     # long-poll (0-20)
+  visibility_timeout: 330   # seconds; must exceed max job execution time
+  max_concurrency: 8
+
+# Batch-completion webhook delivery + retry.
+webhook:
+  max_retries: 3            # additional attempts after the first
+  retry_delay: 10s          # wait before the first retry
+  retry_backoff: 2.0        # delay multiplier per retry (1.0 = fixed delay)
+  retry_max_delay: 5m       # cap on the retry delay
+  timeout: 10s              # per-attempt HTTP timeout
 
 docker:
   host: "unix:///var/run/docker.sock"

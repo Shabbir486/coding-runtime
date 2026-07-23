@@ -78,6 +78,7 @@ type Submission struct {
 	CompilerOptions string     `gorm:"type:varchar(512)"                      json:"compiler_options"`
 	CommandLineArgs string     `gorm:"type:varchar(512)"                      json:"command_line_arguments"`
 	CallbackURL     string     `gorm:"type:varchar(2048)"                     json:"callback_url"`
+	BatchID         *string    `gorm:"type:varchar(36);index"                 json:"batch_id"`
 	AdditionalFiles string     `gorm:"type:text"                              json:"additional_files"`
 	WorkerID        *string    `gorm:"type:varchar(256)"                      json:"worker_id"`
 	StartedAt       *time.Time `                                              json:"started_at"`

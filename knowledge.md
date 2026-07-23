@@ -21,12 +21,12 @@ The platform is built around three Go services:
 - **api-gateway** — REST API, JWT auth, rate-limiting, persists submissions,
   publishes execution jobs to NATS.
 - **worker** — consumes jobs, spawns a fresh Docker sandbox per job, streams
-  stdout/stderr, updates Postgres + Redis.
+  stdout/stderr, updates MySQL + Redis.
 - **queue-manager** — owns NATS JetStream topology (stream creation) and
   runs the Dead Letter Queue processor.
 
-Plus infrastructure: Postgres, Redis, NATS JetStream, Prometheus, Grafana,
-Jaeger.
+Plus infrastructure: MySQL (AWS RDS in prod), Redis (AWS ElastiCache in prod),
+NATS JetStream, Prometheus, Grafana, Jaeger.
 
 ---
 
@@ -125,6 +125,69 @@ Every sandbox container runs with:
 The bind-mounted scratch dir at `/tmp/sandbox/<uuid>` is created per
 submission and `os.RemoveAll`'d when the job ends.
 
+### 2.8 Batches: creation and execution are DECOUPLED
+
+A **batch** (`POST /batches`) groups up to 20 submissions under one
+`batch_id` and persists a `batches` row carrying `total` and `completed`
+counters ([internal/models/batch.go](internal/models/batch.go)). Each
+submission row gets a nullable `batch_id` FK, and the `ExecutionJob` carries
+it through the queue so the worker knows which batch a job belongs to.
+
+**Critical invariant: `POST /batches` does NOT start execution.** It persists
+the batch + all submissions **atomically** (`BatchRepository.CreateWithSubmissions`,
+one tx) in `pending` state and returns `{batch_id, tokens}`. Execution begins
+only when the batch is *started* — via `POST /batches/:id/start` or a
+`START_BATCH_PROCESSING {batch_id}` event on the SQS start queue
+([internal/batchproc/starter.go](internal/batchproc/starter.go)). This exists so
+an external orchestrator (e.g. an Assessment Service) can commit its own
+token/batch mappings **before** any result webhook can fire — without it,
+execution would begin during creation and the completion webhook could race
+ahead of the caller's persistence. `Starter.Start` is **idempotent**: it claims
+the `pending → processing` transition with a conditional UPDATE
+(`MarkProcessing`, returns true once), then fans the submissions out to the job
+queue; duplicate START events are no-ops, and a failed fan-out rolls the batch
+back to `pending` so the event can be retried. The SQS worker runs **two**
+consumers: the per-submission job consumer *and* the batch-start consumer
+([internal/queue/sqs/start_consumer.go](internal/queue/sqs/start_consumer.go)).
+
+Completion detection (below) is unchanged — only the *trigger* moved out of
+batch creation.
+
+The non-obvious part is **how completion is detected**. There is no poller and
+no "batch coordinator" service. Instead, every time a worker finishes a
+submission (success *or* terminal failure — see `advanceBatch` in
+[internal/worker/worker.go](internal/worker/worker.go)) it calls
+`BatchRepository.IncrementCompleted`, which does an **atomic**
+`UPDATE … SET completed = completed + 1` plus a `CASE` status transition in a
+single transaction and re-reads the row. MySQL/InnoDB row-locking serialises
+concurrent workers, so exactly one worker observes `completed == total` and
+fires the webhook. This means batch completion is correct even with N workers
+× M concurrency racing on the last few submissions, with zero extra
+infrastructure.
+
+The webhook itself (`POST /webhooks`) stores a URL plus an outbound `api_key`.
+On delivery the platform POSTs the full `BatchResponse` and sets the
+`X-API-Key` header to that key so the receiver can authenticate the call —
+the key is **outbound**, not used to authenticate registration.
+
+Delivery logic lives in [internal/webhook/dispatcher.go](internal/webhook/dispatcher.go),
+deliberately shared by **both** the worker (automatic fire on completion) and
+the api-gateway (`POST /batches/:id/callback` re-fires on demand). The
+dispatcher assembles the payload from the DB, POSTs it, and records
+`webhook_status` / `webhook_sent_at` on the batch regardless of outcome.
+
+**Retries (configurable, `CODERUNTIME_WEBHOOK_*`).** The worker uses
+`DispatchBatchWithRetry` — 1 + `WEBHOOK_MAX_RETRIES` attempts with exponential
+backoff (`WEBHOOK_RETRY_DELAY` × `WEBHOOK_RETRY_BACKOFF`, capped at
+`WEBHOOK_RETRY_MAX_DELAY`); only after all attempts fail is `webhook_status` set
+to `failed`. It runs in a goroutine on a **detached context** (background +
+`RetryBudget()` timeout) so multi-minute retries neither hold a worker slot nor
+get cancelled when the job's context ends. The callback endpoint uses
+`DispatchBatch` — a **single** immediate attempt — because the endpoint itself
+*is* the manual retry, and the HTTP caller wants a prompt result. The callback
+remains the fallback when auto-retries are exhausted (receiver was down the
+whole window) without re-running any code.
+
 ---
 
 ## 3. Mental model — three layers
@@ -178,7 +241,7 @@ and returns the result table.
    `CODERUNTIME_WORKER_CONCURRENCY`. Acquire a slot or wait.
 8. **Sandbox executes** (see diagram above). Compile step first if the
    language has a `CompileCommand` (`gcc`, `javac`, …).
-9. **Worker updates** the Postgres `submissions` row, writes results to Redis
+9. **Worker updates** the MySQL `submissions` row, writes results to Redis
    with TTL, releases the semaphore slot.
 10. **API completes** — if it was waiting, Redis poll succeeds and the HTTP
     response is sent. Otherwise the client polls `GET /submissions/<id>`.
@@ -186,6 +249,11 @@ and returns the result table.
 Failed jobs that exhaust `CODERUNTIME_WORKER_MAX_RETRIES` (default 3)
 get routed to the **Dead Letter Queue** stream and parked by
 `queue-manager`'s DLQ handler.
+
+If the submission belongs to a batch (`job.BatchID != ""`), the worker also
+runs `advanceBatch` after the result is persisted (step 10b) — atomically
+incrementing the batch's `completed` counter and, when it reaches `total`,
+dispatching the linked webhook. See section 2.8.
 
 ---
 
@@ -196,12 +264,15 @@ get routed to the **Dead Letter Queue** stream and parked by
 | `cmd/api-gateway/` | REST API entrypoint |
 | `cmd/worker/` | Worker entrypoint |
 | `cmd/queue-manager/` | DLQ + stream-topology owner |
+| `cmd/migrate/` | Standalone migrate+seed tool (`make migrate`) — same GORM logic as startup, for CI / pre-deploy against RDS |
 | `internal/api/handlers/` | HTTP handlers (one file per resource) |
 | `internal/api/middleware/` | JWT, rate-limit, logging, CORS, recovery |
 | `internal/config/` | Viper config loading (single source of truth for env vars) |
-| `internal/database/` | GORM models, migrations, repositories |
+| `internal/database/` | GORM models, migrations, repositories (incl. `batch_repository.go`) |
+| `internal/webhook/` | Batch-completion webhook dispatcher (shared by worker + api) |
 | `internal/cache/` | Redis client + `SubmissionCache` |
-| `internal/queue/` | NATS client, publisher, consumer, DLQ |
+| `internal/queue/` | Queue abstraction (Publisher, JobConsumer) + NATS client/publisher/consumer/DLQ |
+| `internal/queue/sqs/` | Amazon SQS publisher + consumer + DLQ drainer (token-only payload) |
 | `internal/runtime/` | `manager.go` routes to sandbox or DB runtime |
 | `internal/sandbox/` | Docker sandbox executor (`docker.go`, `image_pool.go`) |
 | `internal/worker/` | `Pool` and `Worker` types — semaphore + NATS subscriber |
@@ -334,9 +405,54 @@ registry so the API surface is complete, but they won't appear in
 - **`network: none` means no DNS either.** If a language needs to fetch
   packages at execution time (rare — most prefer pre-installed packages),
   it must be done at image build time in the Dockerfile.
-- **Postgres `max_connections=200` is the default cap.** At ~5+ api pods
-  with `database.max_open_conns: 25`, you'll hit this. Add PgBouncer
-  before scaling api beyond that.
+- **MySQL `max_connections` cap (200 in compose; RDS default scales with
+  instance class).** At ~5+ api pods with `database.max_open_conns: 25` you'll
+  hit this. Use RDS Proxy / ProxySQL or raise the RDS `max_connections`
+  parameter before scaling api beyond that.
+- **MySQL migration constraints.** The app DB is MySQL (driver
+  `gorm.io/driver/mysql`, see [internal/database/mysql.go](internal/database/mysql.go)).
+  Unlike Postgres, MySQL has **no `CREATE INDEX IF NOT EXISTS`** and **no
+  partial (`WHERE`) indexes**, so [migrations.go](internal/database/migrations.go)
+  creates each secondary index via an `ensureIndex` helper that checks
+  `information_schema.statistics` first and drops all partial predicates.
+  `DATABASE_SSL_MODE` maps to the driver's `tls` param
+  (`disable`/`true`/`skip-verify`/`preferred`) — use `true` for AWS RDS. The
+  DSN needs `parseTime=true` (set in `mysql.go`) or `time.Time` columns fail to
+  scan.
+- **Redis / AWS ElastiCache.** Standalone client, no AUTH token in prod (leave
+  `REDIS_PASSWORD` empty). ElastiCache **Serverless** (Valkey/Redis) only accepts
+  **TLS** connections — set `CODERUNTIME_REDIS_TLS_ENABLED=true`
+  ([config wiring](internal/config/config.go) → [cache client](internal/cache/redis.go)),
+  otherwise the connection hangs/resets. The serverless endpoint
+  (`*.serverless.<region>.cache.amazonaws.com`) resolves to **private VPC IPs**,
+  so it's only reachable from inside the VPC — you can't smoke-test it from a
+  laptop, only from the EC2/ECS host running the stack. Compose defaults to the
+  local `redis` container (`REDIS_HOST=${REDIS_HOST:-redis}`); override
+  `REDIS_HOST` + `REDIS_TLS_ENABLED=true` to point at ElastiCache.
+- **Pluggable job queue: NATS or SQS.** `CODERUNTIME_QUEUE_PROVIDER` selects
+  the backend (`nats` default / `sqs`). Both implement `queue.Publisher` and
+  `queue.JobConsumer` ([internal/queue/transport.go](internal/queue/transport.go)),
+  so api-gateway and worker swap implementations behind the interface — handlers
+  are untouched. Non-obvious bits of the SQS path
+  ([internal/queue/sqs/](internal/queue/sqs/)):
+  - **Token-only messages.** SQS caps payloads at 256 KB but `ExecutionJob`
+    embeds source code, so SQS publishes only `{token}` and the worker re-reads
+    the job from MySQL via a `JobLoader`. (NATS still carries the full job.)
+  - **Priority = two queues.** SQS has no priority; the consumer polls the
+    priority queue (short long-poll) before the normal queue.
+  - **Retries/DLQ are the SQS redrive policy**, not `dlq.go`. Retriable errors
+    `ChangeMessageVisibility` for backoff; after `maxReceiveCount` SQS moves the
+    message to the DLQ. When `provider=sqs`, queue-manager skips NATS entirely
+    and instead runs an SQS **DLQ drainer** (marks dead-lettered submissions
+    failed in MySQL) + a queue-depth metrics poller.
+  - **Credentials** come from the standard AWS chain (IAM task/instance role) —
+    never configured in the app.
+- **`done:{token}` notifications are Redis, not NATS.** The worker publishes
+  completion to the Redis `done:{token}` channel (`subCache.PublishDone`), which
+  is what `?wait=true` waiters subscribe to ([internal/queue/wait.go](internal/queue/wait.go)).
+  This keeps the wait path independent of the queue backend, so the worker needs
+  no NATS connection under SQS. (Historically the worker published this to NATS,
+  which nothing consumed — the waiter always used Redis.)
 - **`go.sum` is enforced.** The Go Dockerfiles run `go mod verify` —
   modules added without `go mod tidy + verify` will break the image build.
 

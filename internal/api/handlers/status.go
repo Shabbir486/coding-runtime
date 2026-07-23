@@ -8,9 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/cache"
-	"github.com/mdshabbir-ali/code-runtime/internal/database"
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
+	"github.com/revature/corems-code-executor/internal/cache"
+	"github.com/revature/corems-code-executor/internal/database"
+	"github.com/revature/corems-code-executor/internal/models"
 )
 
 // StatusHandler handles /statuses, /health, and /ready routes.
@@ -54,11 +54,11 @@ func (h *StatusHandler) HealthCheck(c *gin.Context) {
 	overall := "ok"
 
 	if err := h.db.Ping(ctx); err != nil {
-		h.log.Warn("health: postgres unreachable", zap.Error(err))
-		services["postgres"] = "unhealthy"
+		h.log.Warn("health: mysql unreachable", zap.Error(err))
+		services["mysql"] = "unhealthy"
 		overall = "degraded"
 	} else {
-		services["postgres"] = "ok"
+		services["mysql"] = "ok"
 	}
 
 	if err := h.redis.Ping(ctx); err != nil {
@@ -87,10 +87,10 @@ func (h *StatusHandler) ReadinessCheck(c *gin.Context) {
 	defer cancel()
 
 	if err := h.db.Ping(ctx); err != nil {
-		h.log.Warn("readiness: postgres not ready", zap.Error(err))
+		h.log.Warn("readiness: mysql not ready", zap.Error(err))
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"ready":  false,
-			"reason": "postgres unavailable",
+			"reason": "mysql unavailable",
 		})
 		return
 	}

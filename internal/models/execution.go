@@ -43,6 +43,7 @@ type ExecutionJob struct {
 	CompilerOptions string    `json:"compiler_options"`
 	CommandLineArgs string    `json:"command_line_arguments"`
 	CallbackURL     string    `json:"callback_url"`
+	BatchID         string    `json:"batch_id,omitempty"`
 	RetryCount      int       `json:"retry_count"`
 	Priority        int       `json:"priority"`
 	EnqueuedAt      time.Time `json:"enqueued_at"`
@@ -105,6 +106,9 @@ func (j *ExecutionJob) FromSubmission(s *Submission) {
 	j.CompilerOptions = s.CompilerOptions
 	j.CommandLineArgs = s.CommandLineArgs
 	j.CallbackURL = s.CallbackURL
+	if s.BatchID != nil {
+		j.BatchID = *s.BatchID
+	}
 	j.EnqueuedAt = time.Now().UTC()
 	j.ApplyDefaults()
 }

@@ -1,14 +1,12 @@
-version: '3.9'
-
 # Production overrides for docker-compose.yml
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
   api:
-    image: ${REGISTRY}/coderuntime-api:${IMAGE_TAG:-latest}
+    image: ${REGISTRY:-}/coderuntime-api:${IMAGE_TAG:-latest}
     build:
       cache_from:
-        - ${REGISTRY}/coderuntime-api:latest
+        - ${REGISTRY:-}/coderuntime-api:latest
     # No exposed ports in prod — traffic flows through load balancer / ingress
     ports: []
     environment:
@@ -16,23 +14,35 @@ services:
       # through Viper with SetEnvPrefix("CODERUNTIME"). Unprefixed names are
       # silently ignored.
       - CODERUNTIME_DATABASE_HOST=${DATABASE_HOST}
-      - CODERUNTIME_DATABASE_PORT=${DATABASE_PORT:-5432}
+      - CODERUNTIME_DATABASE_PORT=${DATABASE_PORT:-3306}
       - CODERUNTIME_DATABASE_USER=${DATABASE_USER}
       - CODERUNTIME_DATABASE_PASSWORD=${DATABASE_PASSWORD}
       - CODERUNTIME_DATABASE_NAME=${DATABASE_NAME:-coderuntime}
-      - CODERUNTIME_DATABASE_SSL_MODE=require
+      - CODERUNTIME_DATABASE_SSL_MODE=true
       - CODERUNTIME_DATABASE_MAX_OPEN_CONNS=50
       - CODERUNTIME_DATABASE_MAX_IDLE_CONNS=10
       - CODERUNTIME_REDIS_HOST=${REDIS_HOST}
       - CODERUNTIME_REDIS_PORT=${REDIS_PORT:-6379}
       - CODERUNTIME_REDIS_PASSWORD=${REDIS_PASSWORD}
+      # AWS ElastiCache Serverless requires in-transit TLS; no AUTH token needed.
+      - CODERUNTIME_REDIS_TLS_ENABLED=${REDIS_TLS_ENABLED:-true}
       - CODERUNTIME_NATS_URL=${NATS_URL}
       - CODERUNTIME_JWT_SECRET=${JWT_SECRET}
       - CODERUNTIME_LOG_LEVEL=info
       - CODERUNTIME_LOG_FORMAT=json
       - CODERUNTIME_SERVER_PORT=8002
-      - CODERUNTIME_RATE_LIMIT_LIMIT=500
-      - CODERUNTIME_RATE_LIMIT_PERIOD=60s
+      # Per-route-class rate limits (reads/polling generous, writes moderate,
+      # auth tight). Internal services listed in TRUSTED_API_KEYS bypass these.
+      - CODERUNTIME_RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - CODERUNTIME_RATE_LIMIT_READ_LIMIT=${RATE_LIMIT_READ_LIMIT:-3000}
+      - CODERUNTIME_RATE_LIMIT_READ_PERIOD=${RATE_LIMIT_READ_PERIOD:-60s}
+      - CODERUNTIME_RATE_LIMIT_WRITE_LIMIT=${RATE_LIMIT_WRITE_LIMIT:-600}
+      - CODERUNTIME_RATE_LIMIT_WRITE_PERIOD=${RATE_LIMIT_WRITE_PERIOD:-60s}
+      - CODERUNTIME_RATE_LIMIT_AUTH_LIMIT=${RATE_LIMIT_AUTH_LIMIT:-30}
+      - CODERUNTIME_RATE_LIMIT_AUTH_PERIOD=${RATE_LIMIT_AUTH_PERIOD:-60s}
+      - CODERUNTIME_RATE_LIMIT_TRUSTED_API_KEYS=${RATE_LIMIT_TRUSTED_API_KEYS:-}
+      # Trust the LB/ingress CIDR so client IPs (and per-IP limits) resolve.
+      - CODERUNTIME_SERVER_TRUSTED_PROXIES=${SERVER_TRUSTED_PROXIES:-}
       - CODERUNTIME_TRACING_ENABLED=true
       - CODERUNTIME_TRACING_ENDPOINT=${OTEL_ENDPOINT}
       - CODERUNTIME_TRACING_SERVICE_NAME=api-gateway
@@ -41,7 +51,7 @@ services:
       update_config:
         parallelism: 1
         delay: 10s
-        order: rolling-update
+        order: start-first
         failure_action: rollback
       rollback_config:
         parallelism: 1
@@ -74,16 +84,21 @@ services:
         - ${REGISTRY}/coderuntime-worker:latest
     environment:
       - CODERUNTIME_DATABASE_HOST=${DATABASE_HOST}
-      - CODERUNTIME_DATABASE_PORT=${DATABASE_PORT:-5432}
+      - CODERUNTIME_DATABASE_PORT=${DATABASE_PORT:-3306}
       - CODERUNTIME_DATABASE_USER=${DATABASE_USER}
       - CODERUNTIME_DATABASE_PASSWORD=${DATABASE_PASSWORD}
       - CODERUNTIME_DATABASE_NAME=${DATABASE_NAME:-coderuntime}
-      - CODERUNTIME_DATABASE_SSL_MODE=require
+      - CODERUNTIME_DATABASE_SSL_MODE=true
       - CODERUNTIME_REDIS_HOST=${REDIS_HOST}
       - CODERUNTIME_REDIS_PORT=${REDIS_PORT:-6379}
       - CODERUNTIME_REDIS_PASSWORD=${REDIS_PASSWORD}
+      # AWS ElastiCache Serverless requires in-transit TLS; no AUTH token needed.
+      - CODERUNTIME_REDIS_TLS_ENABLED=${REDIS_TLS_ENABLED:-true}
       - CODERUNTIME_NATS_URL=${NATS_URL}
-      - CODERUNTIME_WORKER_COUNT=8
+      # In-process workers + per-worker sandbox concurrency, both PER container.
+      # Container count is WORKER_REPLICAS (deploy.replicas) below.
+      - CODERUNTIME_WORKER_COUNT=${WORKER_COUNT:-4}
+      - CODERUNTIME_WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-4}
       - CODERUNTIME_DOCKER_HOST=unix:///var/run/docker.sock
       - CODERUNTIME_WORKER_TMP_DIR=/tmp/sandbox
       - CODERUNTIME_WORKER_JOB_TIMEOUT=30s
@@ -95,7 +110,8 @@ services:
       - CODERUNTIME_TRACING_ENDPOINT=${OTEL_ENDPOINT}
       - CODERUNTIME_TRACING_SERVICE_NAME=worker
     deploy:
-      replicas: 4
+      # Number of worker CONTAINERS. This is the count you see in `docker ps`.
+      replicas: ${WORKER_REPLICAS:-8}
       update_config:
         parallelism: 1
         delay: 15s
@@ -125,54 +141,19 @@ services:
     networks:
       - coderuntime
 
-  postgres:
-    environment:
-      POSTGRES_USER: ${DATABASE_USER}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
-      POSTGRES_DB: ${DATABASE_NAME:-coderuntime}
-    ports: []
+  # Local MySQL / Redis are NOT used in prod — the app points at AWS RDS and
+  # ElastiCache via env (DATABASE_HOST / REDIS_HOST). Both services are still
+  # *defined* in the base docker-compose.yml, and a compose overlay can't delete
+  # a base service — so we override them to run ZERO replicas here. (Deleting
+  # these blocks would leave the base mysql/redis running.) `docker stack deploy`
+  # ignores depends_on, so nothing waits on them.
+  mysql:
     deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "3"
-    networks:
-      - coderuntime
+      replicas: 0
 
   redis:
-    ports: []
-    command: >
-      redis-server
-        --maxmemory 1gb
-        --maxmemory-policy allkeys-lru
-        --requirepass ${REDIS_PASSWORD}
-        --save 60 1000
-        --appendonly yes
-        --appendfsync everysec
-        --loglevel warning
     deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "20m"
-        max-file: "3"
-    networks:
-      - coderuntime
+      replicas: 0
 
   nats:
     ports: []

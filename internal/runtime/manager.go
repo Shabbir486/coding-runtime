@@ -8,10 +8,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/cache"
-	"github.com/mdshabbir-ali/code-runtime/internal/database"
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
-	"github.com/mdshabbir-ali/code-runtime/internal/sandbox"
+	"github.com/revature/corems-code-executor/internal/cache"
+	"github.com/revature/corems-code-executor/internal/database"
+	"github.com/revature/corems-code-executor/internal/models"
+	"github.com/revature/corems-code-executor/internal/sandbox"
 )
 
 // Manager resolves language metadata and translates submission records into

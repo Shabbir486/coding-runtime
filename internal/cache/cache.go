@@ -7,8 +7,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
+	"github.com/revature/corems-code-executor/internal/config"
+	"github.com/revature/corems-code-executor/internal/models"
 )
 
 // Client is an alias for Cache so that callers that use "cache.Client" continue
@@ -22,11 +22,12 @@ type Client = Cache
 func NewClient(cfg *config.Config, log *zap.Logger) (*Client, error) {
 	r := cfg.Redis
 	redisCfg := RedisConfig{
-		Host:     r.Host,
-		Port:     r.Port,
-		Password: r.Password,
-		DB:       r.DB,
-		PoolSize: r.PoolSize,
+		Host:       r.Host,
+		Port:       r.Port,
+		Password:   r.Password,
+		DB:         r.DB,
+		PoolSize:   r.PoolSize,
+		TLSEnabled: r.TLSEnabled,
 	}
 	return NewRedis(redisCfg, log)
 }
@@ -96,5 +97,16 @@ func (lc *LanguageCache) GetByID(ctx context.Context, id int) (*models.Language,
 func (lc *LanguageCache) Invalidate(ctx context.Context, id int) error {
 	_ = lc.cache.Delete(ctx, languagesKey)
 	_ = lc.cache.Delete(ctx, languageKey(id))
+	return nil
+}
+
+// InvalidateAll drops the cached language list and every per-language entry for
+// the given ids. Called on startup so a redeploy never serves a stale list
+// (e.g. after the active-language policy changes).
+func (lc *LanguageCache) InvalidateAll(ctx context.Context, ids []int) error {
+	_ = lc.cache.Delete(ctx, languagesKey)
+	for _, id := range ids {
+		_ = lc.cache.Delete(ctx, languageKey(id))
+	}
 	return nil
 }

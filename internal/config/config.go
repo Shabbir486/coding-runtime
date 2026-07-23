@@ -17,12 +17,20 @@ type Config struct {
 	Database  DatabaseConfig  `mapstructure:"database"`
 	Redis     RedisConfig     `mapstructure:"redis"`
 	NATS      NATSConfig      `mapstructure:"nats"`
+	SQS       SQSConfig       `mapstructure:"sqs"`
 	Docker    DockerConfig    `mapstructure:"docker"`
 	JWT       JWTConfig       `mapstructure:"jwt"`
 	Worker    WorkerConfig    `mapstructure:"worker"`
 	Metrics   MetricsConfig   `mapstructure:"metrics"`
 	Tracing   TracingConfig   `mapstructure:"tracing"`
 	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
+	Webhook   WebhookConfig   `mapstructure:"webhook"`
+	Batch     BatchConfig     `mapstructure:"batch"`
+
+	// QueueProvider selects the job-queue backend: "nats" (default, local dev)
+	// or "sqs" (AWS production). Workers and the api-gateway pick their queue
+	// implementation from this value.
+	QueueProvider string `mapstructure:"queue_provider"`
 }
 
 // ServerConfig holds HTTP server settings.
@@ -43,7 +51,7 @@ func (s ServerConfig) Address() string {
 	return fmt.Sprintf("%s:%d", s.Host, s.Port)
 }
 
-// DatabaseConfig holds PostgreSQL connection settings.
+// DatabaseConfig holds MySQL connection settings.
 type DatabaseConfig struct {
 	Host            string        `mapstructure:"host"`
 	Port            int           `mapstructure:"port"`
@@ -58,11 +66,16 @@ type DatabaseConfig struct {
 	MigrateOnStart  bool          `mapstructure:"migrate_on_start"`
 }
 
-// DSN returns the PostgreSQL connection string.
+// DSN returns the MySQL connection string (go-sql-driver format).
+// SSLMode maps to the driver's `tls` parameter (disable/true/skip-verify/preferred).
 func (d DatabaseConfig) DSN() string {
+	tls := d.SSLMode
+	if tls == "" {
+		tls = "false"
+	}
 	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-		d.Host, d.Port, d.User, d.Password, d.Name, d.SSLMode,
+		"%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=true&loc=UTC&tls=%s",
+		d.User, d.Password, d.Host, d.Port, d.Name, tls,
 	)
 }
 
@@ -78,6 +91,9 @@ type RedisConfig struct {
 	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 	KeyPrefix    string        `mapstructure:"key_prefix"`
+	// TLSEnabled turns on in-transit encryption. Required for AWS ElastiCache
+	// Serverless (Valkey/Redis) endpoints, which only accept TLS connections.
+	TLSEnabled bool `mapstructure:"tls_enabled"`
 }
 
 // Addr returns the host:port string for Redis.
@@ -101,6 +117,55 @@ type NATSConfig struct {
 	AckWait          time.Duration `mapstructure:"ack_wait"`
 	MaxDeliver       int           `mapstructure:"max_deliver"`
 	MaxAckPending    int           `mapstructure:"max_ack_pending"`
+}
+
+// SQSConfig holds Amazon SQS settings, used when QueueProvider == "sqs".
+// Credentials are resolved from the standard AWS chain (IAM task/instance role,
+// env vars, or shared profile) — never put keys here.
+type SQSConfig struct {
+	Region string `mapstructure:"region"`
+	// Endpoint optionally overrides the SQS endpoint for local emulators
+	// (ElasticMQ / LocalStack). Leave empty for real AWS.
+	Endpoint string `mapstructure:"endpoint"`
+	// JobsQueueURL is the normal-priority job queue.
+	JobsQueueURL string `mapstructure:"jobs_queue_url"`
+	// PriorityQueueURL is the high-priority job queue.
+	PriorityQueueURL string `mapstructure:"priority_queue_url"`
+	// StartQueueURL is the batch-start event queue. The Assessment Service
+	// publishes START_BATCH_PROCESSING {batch_id} here AFTER committing its own
+	// persistence; the worker consumes it and only then fans out execution jobs.
+	StartQueueURL string `mapstructure:"start_queue_url"`
+	// DLQQueueURL is the dead-letter queue (target of the redrive policy).
+	DLQQueueURL string `mapstructure:"dlq_queue_url"`
+	// WaitTimeSeconds is the long-poll wait (0–20). 20 minimises empty receives.
+	WaitTimeSeconds int32 `mapstructure:"wait_time_seconds"`
+	// VisibilityTimeout (seconds) must exceed the max job execution time so a
+	// message is not redelivered while still being processed.
+	VisibilityTimeout int32 `mapstructure:"visibility_timeout"`
+	// MaxConcurrency caps in-flight messages processed per worker poller.
+	MaxConcurrency int `mapstructure:"max_concurrency"`
+}
+
+// WebhookConfig controls outbound batch-completion webhook delivery and its
+// retry behaviour.
+type WebhookConfig struct {
+	// MaxRetries is the number of additional delivery attempts after the first.
+	MaxRetries int `mapstructure:"max_retries"`
+	// RetryDelay is the wait before the first retry.
+	RetryDelay time.Duration `mapstructure:"retry_delay"`
+	// RetryBackoff multiplies the delay after each retry (<=1 keeps it fixed).
+	RetryBackoff float64 `mapstructure:"retry_backoff"`
+	// RetryMaxDelay caps the per-retry delay.
+	RetryMaxDelay time.Duration `mapstructure:"retry_max_delay"`
+	// Timeout is the per-attempt HTTP timeout.
+	Timeout time.Duration `mapstructure:"timeout"`
+}
+
+// BatchConfig controls batch submission limits.
+type BatchConfig struct {
+	// MaxSize caps how many submissions a single batch (POST /batches) may
+	// contain. Override via batch.max_size / BATCH_MAX_SIZE.
+	MaxSize int `mapstructure:"max_size"`
 }
 
 // DockerConfig holds Docker daemon and container execution settings.
@@ -139,8 +204,8 @@ type JWTConfig struct {
 // WorkerConfig holds execution worker pool settings.
 type WorkerConfig struct {
 	Count           int           `mapstructure:"count"`
-	Concurrency     int           `mapstructure:"concurrency"`   // max concurrent jobs per worker
-	NATSSubject     string        `mapstructure:"nats_subject"`  // NATS subject to consume
+	Concurrency     int           `mapstructure:"concurrency"`  // max concurrent jobs per worker
+	NATSSubject     string        `mapstructure:"nats_subject"` // NATS subject to consume
 	MaxRetries      int           `mapstructure:"max_retries"`
 	RetryDelay      time.Duration `mapstructure:"retry_delay"`
 	PollInterval    time.Duration `mapstructure:"poll_interval"`
@@ -169,12 +234,30 @@ type TracingConfig struct {
 }
 
 // RateLimitConfig holds API rate limiting settings.
+//
+// The limit is applied per caller identity (API key when present, else client
+// IP). Separate budgets per route class stop high-frequency polling reads from
+// exhausting the budget needed for expensive writes. ReadLimit/WriteLimit/
+// AuthLimit fall back to Limit/Period when left at zero.
 type RateLimitConfig struct {
-	Enabled      bool          `mapstructure:"enabled"`
-	Limit        int64         `mapstructure:"limit"`
-	Period       time.Duration `mapstructure:"period"`
-	StoreType    string        `mapstructure:"store_type"` // "memory" | "redis"
-	TrustForward bool          `mapstructure:"trust_forward"`
+	Enabled bool `mapstructure:"enabled"`
+	// Limit/Period is the default bucket used when a tier-specific limit is unset.
+	Limit  int64         `mapstructure:"limit"`
+	Period time.Duration `mapstructure:"period"`
+	// ReadLimit/ReadPeriod bounds GET (polling) endpoints — typically generous.
+	ReadLimit  int64         `mapstructure:"read_limit"`
+	ReadPeriod time.Duration `mapstructure:"read_period"`
+	// WriteLimit/WritePeriod bounds POST/DELETE (submit, batch) endpoints.
+	WriteLimit  int64         `mapstructure:"write_limit"`
+	WritePeriod time.Duration `mapstructure:"write_period"`
+	// AuthLimit/AuthPeriod bounds /auth endpoints — tight, to deter brute force.
+	AuthLimit  int64         `mapstructure:"auth_limit"`
+	AuthPeriod time.Duration `mapstructure:"auth_period"`
+	// TrustedAPIKeys is a comma-separated list of API key IDs exempt from the
+	// public limits (e.g. internal server-to-server services).
+	TrustedAPIKeys string `mapstructure:"trusted_api_keys"`
+	StoreType      string `mapstructure:"store_type"` // "memory" | "redis"
+	TrustForward   bool   `mapstructure:"trust_forward"`
 }
 
 // Validate checks that required configuration fields are non-zero.
@@ -251,13 +334,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.trusted_proxies", []string{})
 	v.SetDefault("server.allowed_origins", []string{"*"})
 
-	// Database
+	// Database (MySQL / AWS RDS)
 	v.SetDefault("database.host", "localhost")
-	v.SetDefault("database.port", 5432)
+	v.SetDefault("database.port", 3306)
 	v.SetDefault("database.name", "coderuntime")
-	v.SetDefault("database.user", "postgres")
+	v.SetDefault("database.user", "coderuntime")
 	v.SetDefault("database.password", "")
-	v.SetDefault("database.ssl_mode", "disable")
+	// ssl_mode → MySQL driver `tls`: disable | true | skip-verify | preferred.
+	// AWS RDS: use "true" (or "skip-verify" without the RDS CA bundle).
+	v.SetDefault("database.ssl_mode", "false")
 	v.SetDefault("database.max_open_conns", 25)
 	v.SetDefault("database.max_idle_conns", 10)
 	v.SetDefault("database.conn_max_lifetime", 30*time.Minute)
@@ -275,6 +360,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("redis.read_timeout", 3*time.Second)
 	v.SetDefault("redis.write_timeout", 3*time.Second)
 	v.SetDefault("redis.key_prefix", "cr:")
+	v.SetDefault("redis.tls_enabled", false)
 
 	// NATS
 	v.SetDefault("nats.url", "nats://localhost:4222")
@@ -291,6 +377,30 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("nats.ack_wait", 60*time.Second)
 	v.SetDefault("nats.max_deliver", 3)
 	v.SetDefault("nats.max_ack_pending", 100)
+
+	// Queue backend: "nats" (default, local dev) or "sqs" (AWS prod)
+	v.SetDefault("queue_provider", "nats")
+
+	// SQS (used when queue_provider=sqs). Credentials come from the AWS chain.
+	v.SetDefault("sqs.region", "us-east-1")
+	v.SetDefault("sqs.endpoint", "")
+	v.SetDefault("sqs.jobs_queue_url", "")
+	v.SetDefault("sqs.priority_queue_url", "")
+	v.SetDefault("sqs.start_queue_url", "")
+	v.SetDefault("sqs.dlq_queue_url", "")
+	v.SetDefault("sqs.wait_time_seconds", 20)
+	v.SetDefault("sqs.visibility_timeout", 330) // > 5m worker job timeout
+	v.SetDefault("sqs.max_concurrency", 8)
+
+	// Webhook delivery + retry (batch-completion notifications)
+	v.SetDefault("webhook.max_retries", 3)
+	v.SetDefault("webhook.retry_delay", 10*time.Second)
+	v.SetDefault("webhook.retry_backoff", 2.0)
+	v.SetDefault("webhook.retry_max_delay", 5*time.Minute)
+	v.SetDefault("webhook.timeout", 10*time.Second)
+
+	// Batch submission limits
+	v.SetDefault("batch.max_size", 20)
 
 	// Docker
 	v.SetDefault("docker.host", "unix:///var/run/docker.sock")
@@ -348,6 +458,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("rate_limit.enabled", true)
 	v.SetDefault("rate_limit.limit", int64(100))
 	v.SetDefault("rate_limit.period", time.Minute)
+	// Per-class budgets: reads (polling) are generous, writes moderate, auth tight.
+	v.SetDefault("rate_limit.read_limit", int64(1200))
+	v.SetDefault("rate_limit.read_period", time.Minute)
+	v.SetDefault("rate_limit.write_limit", int64(300))
+	v.SetDefault("rate_limit.write_period", time.Minute)
+	v.SetDefault("rate_limit.auth_limit", int64(30))
+	v.SetDefault("rate_limit.auth_period", time.Minute)
+	v.SetDefault("rate_limit.trusted_api_keys", "")
 	v.SetDefault("rate_limit.store_type", "redis")
 	v.SetDefault("rate_limit.trust_forward", false)
 }

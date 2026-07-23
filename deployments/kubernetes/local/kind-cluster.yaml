@@ -1,0 +1,19 @@
+# Local kind cluster for the LOCAL (SQS-mode) Code Runtime deployment.
+#
+# Pinned node image (kind's bleeding-edge default fails to bootstrap the control
+# plane on Docker 29.x). Mounts:
+#   - the host Docker socket, so the worker runs sandboxes via Docker-out-of-
+#     Docker (it does NOT run dind here — it talks to your Mac's Docker daemon).
+#   - a shared sandbox dir at the SAME path on both sides (/tmp/sandbox), so the
+#     worker's bind-mounts into sandbox containers resolve on macOS.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: coderuntime-local
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.31.6
+    extraMounts:
+      - hostPath: /var/run/docker.sock
+        containerPath: /var/run/docker.sock
+      - hostPath: /tmp/sandbox
+        containerPath: /tmp/sandbox

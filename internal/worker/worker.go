@@ -13,13 +13,14 @@ import (
 	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/cache"
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
-	"github.com/mdshabbir-ali/code-runtime/internal/database"
-	"github.com/mdshabbir-ali/code-runtime/internal/metrics"
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
-	"github.com/mdshabbir-ali/code-runtime/internal/runtime"
-	"github.com/mdshabbir-ali/code-runtime/internal/sandbox"
+	"github.com/revature/corems-code-executor/internal/cache"
+	"github.com/revature/corems-code-executor/internal/config"
+	"github.com/revature/corems-code-executor/internal/database"
+	"github.com/revature/corems-code-executor/internal/metrics"
+	"github.com/revature/corems-code-executor/internal/models"
+	"github.com/revature/corems-code-executor/internal/runtime"
+	"github.com/revature/corems-code-executor/internal/sandbox"
+	"github.com/revature/corems-code-executor/internal/webhook"
 )
 
 // tokenWhereClause is the GORM WHERE clause used consistently across all
@@ -39,6 +40,8 @@ type WorkerDeps struct {
 	Logger    *zap.Logger
 	Metrics   *metrics.Metrics
 	Cfg       *config.WorkerConfig
+	// WebhookRetry configures batch-completion webhook delivery retries.
+	WebhookRetry webhook.RetryConfig
 }
 
 // Worker consumes execution jobs from NATS, runs them in the sandbox, and
@@ -54,11 +57,13 @@ type Worker struct {
 	natsConn  *nats.Conn
 	logger    *zap.Logger
 	metrics   *metrics.Metrics
-	cfg       *config.WorkerConfig
-	semaphore chan struct{} // limits concurrent jobs
-	wg        sync.WaitGroup
-	stopCh    chan struct{}
-	httpCli   *http.Client
+	cfg        *config.WorkerConfig
+	semaphore  chan struct{} // limits concurrent jobs
+	wg         sync.WaitGroup
+	stopCh     chan struct{}
+	httpCli    *http.Client
+	batchRepo  database.BatchRepository
+	dispatcher *webhook.Dispatcher
 }
 
 // NewWorker constructs a Worker from the given id and dependency bundle.
@@ -72,6 +77,12 @@ func NewWorker(id string, deps WorkerDeps) *Worker {
 		sem <- struct{}{}
 	}
 
+	httpCli := &http.Client{Timeout: 10 * time.Second}
+	batchRepo := database.NewBatchRepository(deps.DB)
+	webhookRepo := database.NewWebhookRepository(deps.DB)
+	// nil client → dispatcher builds one whose timeout matches the retry config.
+	dispatcher := webhook.NewDispatcher(batchRepo, webhookRepo, nil, deps.WebhookRetry, deps.Logger)
+
 	return &Worker{
 		id:        id,
 		sandbox:   deps.Sandbox,
@@ -84,11 +95,11 @@ func NewWorker(id string, deps WorkerDeps) *Worker {
 		logger:    deps.Logger.With(zap.String("worker_id", id)),
 		metrics:   deps.Metrics,
 		cfg:       deps.Cfg,
-		semaphore: sem,
-		stopCh:    make(chan struct{}),
-		httpCli: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		semaphore:  sem,
+		stopCh:     make(chan struct{}),
+		httpCli:    httpCli,
+		batchRepo:  batchRepo,
+		dispatcher: dispatcher,
 	}
 }
 
@@ -155,6 +166,13 @@ func (w *Worker) Stop() error {
 	return nil
 }
 
+// ProcessJob exposes the worker's full job-execution pipeline as a handler so
+// non-NATS transports (e.g. the SQS consumer) can drive it directly. The
+// signature matches queue.JobHandler.
+func (w *Worker) ProcessJob(ctx context.Context, job *models.ExecutionJob) error {
+	return w.processJob(ctx, job)
+}
+
 // ─── processJob ─────────────────────────────────────────────────────────────
 
 // processJob executes the full lifecycle of a single code execution job.
@@ -176,7 +194,7 @@ func (w *Worker) processJob(ctx context.Context, job *models.ExecutionJob) error
 	// ── 2. Resolve language ──────────────────────────────────────────────────
 	lang, err := w.runtime.GetLanguage(ctx, job.LanguageID)
 	if err != nil {
-		return w.failJob(ctx, token, models.StatusInternalError, fmt.Sprintf("language lookup: %v", err), "unknown")
+		return w.failJob(ctx, job, models.StatusInternalError, fmt.Sprintf("language lookup: %v", err), "unknown")
 	}
 
 	// ── 3. Build execution request ───────────────────────────────────────────
@@ -216,10 +234,10 @@ func (w *Worker) processJob(ctx context.Context, job *models.ExecutionJob) error
 		}
 		dbRes, dbErr := w.dbRuntime.Execute(ctx, dbReq)
 		if dbErr != nil && dbRes == nil {
-			return w.failJob(ctx, token, models.StatusInternalError, dbErr.Error(), langName)
+			return w.failJob(ctx, job, models.StatusInternalError, dbErr.Error(), langName)
 		}
 		if dbRes == nil {
-			return w.failJob(ctx, token, models.StatusInternalError, "nil db execution result", langName)
+			return w.failJob(ctx, job, models.StatusInternalError, "nil db execution result", langName)
 		}
 		execResult = &sandbox.ExecutionResult{
 			Stdout:     dbRes.Stdout,
@@ -235,10 +253,10 @@ func (w *Worker) processJob(ctx context.Context, job *models.ExecutionJob) error
 	}
 
 	if execErr != nil && execResult == nil {
-		return w.failJob(ctx, token, models.StatusInternalError, execErr.Error(), langName)
+		return w.failJob(ctx, job, models.StatusInternalError, execErr.Error(), langName)
 	}
 	if execResult == nil {
-		return w.failJob(ctx, token, models.StatusInternalError, "nil execution result", langName)
+		return w.failJob(ctx, job, models.StatusInternalError, "nil execution result", langName)
 	}
 
 	// ── 5. Map sandbox status to submission status ───────────────────────────
@@ -277,7 +295,7 @@ func (w *Worker) processJob(ctx context.Context, job *models.ExecutionJob) error
 	}
 
 	// ── 8. Publish completion notification ──────────────────────────────────
-	w.publishDoneNotification(token, statusID)
+	w.publishDoneNotification(ctx, token, statusID)
 
 	// ── 9. Log to execution_logs ─────────────────────────────────────────────
 	w.writeExecutionLog(ctx, token, statusID, wallTime)
@@ -286,6 +304,9 @@ func (w *Worker) processJob(ctx context.Context, job *models.ExecutionJob) error
 	if job.CallbackURL != "" {
 		go w.sendCallback(job.CallbackURL, token, execResult, statusID, finishedAt)
 	}
+
+	// ── 10b. Batch completion / webhook ──────────────────────────────────────
+	w.advanceBatch(ctx, job.BatchID)
 
 	// ── 11. Record metrics ────────────────────────────────────────────────────
 	statusName := models.StatusDescriptions[statusID]
@@ -321,7 +342,8 @@ func (w *Worker) updateSubmissionStatus(ctx context.Context, token string, statu
 		}).Error
 }
 
-func (w *Worker) failJob(ctx context.Context, token string, statusID int, msg string, langName string) error {
+func (w *Worker) failJob(ctx context.Context, job *models.ExecutionJob, statusID int, msg, langName string) error {
+	token := job.SubmissionToken
 	w.logger.Error("job failed", zap.String("token", token), zap.Int("status_id", statusID), zap.String("msg", msg))
 	finishedAt := time.Now().UTC()
 	_ = w.db.WithContext(ctx).
@@ -333,13 +355,51 @@ func (w *Worker) failJob(ctx context.Context, token string, statusID int, msg st
 			"finished_at": finishedAt,
 		}).Error
 	w.publishRedisStatus(ctx, token, statusID)
-	w.publishDoneNotification(token, statusID)
+	w.publishDoneNotification(ctx, token, statusID)
+	// A failed submission is terminal — advance the batch so the webhook
+	// fires once every submission (passing or failing) has finished.
+	w.advanceBatch(ctx, job.BatchID)
 	statusName := models.StatusDescriptions[statusID]
 	if statusName == "" {
 		statusName = fmt.Sprintf("%d", statusID)
 	}
 	w.metrics.JobsFailed.WithLabelValues(w.id, statusName, langName).Inc()
 	return fmt.Errorf("job %s failed with status %d: %s", token, statusID, msg)
+}
+
+// advanceBatch records that one submission in a batch has reached a terminal
+// state. When the increment completes the batch and a webhook is linked, the
+// batch result is delivered. A no-op for non-batch submissions.
+func (w *Worker) advanceBatch(ctx context.Context, batchID string) {
+	if batchID == "" {
+		return
+	}
+	batch, err := w.batchRepo.IncrementCompleted(ctx, batchID)
+	if err != nil {
+		w.logger.Warn("batch increment failed", zap.String("batch_id", batchID), zap.Error(err))
+		return
+	}
+	if !batch.IsComplete() {
+		return
+	}
+	if batch.WebhookID == nil || *batch.WebhookID == "" {
+		w.logger.Info("batch complete (no webhook linked)", zap.String("batch_id", batchID))
+		return
+	}
+	w.logger.Info("batch complete, dispatching webhook", zap.String("batch_id", batchID))
+	// Deliver asynchronously with retries on a DETACHED context: retries may
+	// span minutes and must outlive this job's context (which is cancelled when
+	// processJob returns) without holding the worker's processing slot.
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		dctx, cancel := context.WithTimeout(context.Background(), w.dispatcher.RetryBudget())
+		defer cancel()
+		if err := w.dispatcher.DispatchBatchWithRetry(dctx, batchID); err != nil {
+			w.logger.Warn("batch webhook dispatch failed after retries",
+				zap.String("batch_id", batchID), zap.Error(err))
+		}
+	}()
 }
 
 func (w *Worker) publishRedisStatus(ctx context.Context, token string, statusID int) {
@@ -355,14 +415,16 @@ func (w *Worker) publishRedisStatus(ctx context.Context, token string, statusID 
 	}
 }
 
-func (w *Worker) publishDoneNotification(token string, statusID int) {
-	subject := "done:" + token
-	payload, _ := json.Marshal(map[string]interface{}{
-		"token":     token,
-		"status_id": statusID,
-	})
-	if err := w.natsConn.Publish(subject, payload); err != nil {
-		w.logger.Warn("nats done notification failed", zap.String("subject", subject), zap.Error(err))
+// publishDoneNotification unblocks any api-gateway waiter (?wait=true) via the
+// Redis "done:{token}" pub/sub channel — which is what wait.go / the submission
+// handler subscribe to. Using Redis (not NATS) keeps this path independent of
+// the job-queue backend, so the worker needs no NATS connection under SQS.
+func (w *Worker) publishDoneNotification(ctx context.Context, token string, _ int) {
+	if w.subCache == nil {
+		return
+	}
+	if err := w.subCache.PublishDone(ctx, token); err != nil {
+		w.logger.Warn("redis done notification failed", zap.String("token", token), zap.Error(err))
 	}
 }
 

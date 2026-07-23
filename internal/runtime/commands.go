@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"strings"
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
+	"github.com/revature/corems-code-executor/internal/models"
 )
 
 const sandboxBinary = "/sandbox/main"

@@ -1,0 +1,89 @@
+# Worker autoscaling on SQS backlog (KEDA).
+#
+# WHY NOT THE CPU HPA: the worker runs each submission as a SIBLING Docker
+# container (Docker-out-of-Docker). The compile/run CPU is charged to those
+# containers, NOT the worker pod's cgroup — so the worker pod sits near-idle
+# even at full throughput, and a CPU/memory HPA never scales it. The only signal
+# that reflects real demand is the SQS queue depth. KEDA scales the worker to
+# drain the backlog, which is what lets it absorb millions of submissions:
+# desired_replicas = ceil(ApproximateNumberOfMessagesVisible / queueLength),
+# capped at maxReplicaCount. Pair with cluster-autoscaler/Karpenter so nodes
+# are added when these pods go Pending.
+#
+# Replaces the worker HorizontalPodAutoscaler (delete that — KEDA creates its
+# own HPA named keda-hpa-worker; two HPAs on one Deployment conflict).
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-aws-sqs
+  namespace: coderuntime
+spec:
+  # LOCAL / non-EKS: static keys from the aws-credentials Secret.
+  # PROD on EKS: delete secretTargetRef and use IRSA instead —
+  #   podIdentity: { provider: aws }
+  # and annotate the keda-operator ServiceAccount with the role ARN.
+  secretTargetRef:
+    - parameter: awsAccessKeyID
+      name: aws-credentials
+      key: AWS_ACCESS_KEY_ID
+    - parameter: awsSecretAccessKey
+      name: aws-credentials
+      key: AWS_SECRET_ACCESS_KEY
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 1     # LOCAL: matches the live EKS ScaledObject (1→20)
+  maxReplicaCount: 20
+  pollingInterval: 15        # seconds between SQS depth checks
+  cooldownPeriod: 120        # seconds idle before scaling back to min
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 100        # double pods every 15s under backlog
+              periodSeconds: 15
+            - type: Pods
+              value: 10
+              periodSeconds: 15
+          selectPolicy: Max
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 5
+              periodSeconds: 60
+  triggers:
+    # Primary: normal-priority jobs queue. queueLength = target messages PER pod.
+    # Lower = more aggressive scaling. 50 is a sane prod start; tune to your
+    # per-job duration and worker concurrency.
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: keda-aws-sqs
+      metadata:
+        queueURL: https://sqs.ap-southeast-2.amazonaws.com/768054003064/code-submission-processing-queue
+        queueLength: "50"
+        awsRegion: ap-southeast-2
+        # count in-flight (not-visible) messages too, so we don't scale down
+        # while work is still being processed.
+        scaleOnInFlight: "true"
+    # Secondary: batch-start events.
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: keda-aws-sqs
+      metadata:
+        queueURL: https://sqs.ap-southeast-2.amazonaws.com/768054003064/code-submission-completed-queue
+        queueLength: "50"
+        awsRegion: ap-southeast-2

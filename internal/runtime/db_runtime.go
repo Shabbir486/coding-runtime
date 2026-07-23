@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/sandbox"
+	"github.com/revature/corems-code-executor/internal/sandbox"
 )
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -265,6 +265,14 @@ func (r *DBRuntime) runEphemeralDB(ctx context.Context, spec ephemeralDBSpec) (*
 	deadline := time.Duration(spec.wallLimit*float64(time.Second)) + 5*time.Second
 	runCtx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
+
+	// Ensure the runtime image is present locally before creating the container.
+	// Unlike the sandbox path, runEphemeralDB calls ContainerCreate directly, so
+	// it must trigger the same registry-aware pull+retag (e.g. pull from ECR and
+	// tag to the bare code-runtime-<db>:latest name) that the pool performs.
+	if err := r.docker.ImagePool().EnsureImage(runCtx, spec.image); err != nil {
+		return nil, fmt.Errorf("db_runtime: ensure image %q: %w", spec.image, err)
+	}
 
 	created, err := r.client.ContainerCreate(runCtx, containerCfg, hostConfig, nil, nil, spec.name)
 	if err != nil {

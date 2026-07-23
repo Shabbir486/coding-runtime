@@ -5,14 +5,14 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
+	"github.com/revature/corems-code-executor/internal/config"
+	"github.com/revature/corems-code-executor/internal/models"
 )
 
-// Connect opens a PostgreSQL connection using the application config.
-// It delegates to NewPostgres (defined in postgres.go) with converted parameters.
+// Connect opens a MySQL connection using the application config.
+// It delegates to NewMySQL (defined in mysql.go) with converted parameters.
 func Connect(cfg *config.Config, log *zap.Logger) (*DB, error) {
-	return NewPostgres(DatabaseConfig{
+	return NewMySQL(DatabaseConfig{
 		Host:                cfg.Database.Host,
 		Port:                cfg.Database.Port,
 		User:                cfg.Database.User,
@@ -38,5 +38,7 @@ func (d *DB) AutoMigrateAll() error {
 		&models.ExecutionLog{},
 		&models.User{},
 		&models.APIKey{},
+		&models.Webhook{},
+		&models.Batch{},
 	)
 }

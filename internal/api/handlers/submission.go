@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,14 +12,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/revature/corems-code-executor/internal/cache"
+	"github.com/revature/corems-code-executor/internal/config"
+	"github.com/revature/corems-code-executor/internal/database"
+	"github.com/revature/corems-code-executor/internal/metrics"
+	"github.com/revature/corems-code-executor/internal/models"
+	"github.com/revature/corems-code-executor/internal/queue"
 	"go.uber.org/zap"
-
-	"github.com/mdshabbir-ali/code-runtime/internal/cache"
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
-	"github.com/mdshabbir-ali/code-runtime/internal/database"
-	"github.com/mdshabbir-ali/code-runtime/internal/metrics"
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
-	"github.com/mdshabbir-ali/code-runtime/internal/queue"
 )
 
 const (
@@ -74,7 +75,7 @@ func (h *SubmissionHandler) CreateSubmission(c *gin.Context) {
 		}
 	}
 
-	sub, sourceCode, stdin, err := h.buildSubmission(req)
+	sub, sourceCode, stdin, err := buildSubmission(req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -99,7 +100,8 @@ func (h *SubmissionHandler) CreateSubmission(c *gin.Context) {
 }
 
 // buildSubmission decodes fields and constructs the Submission DB model.
-func (h *SubmissionHandler) buildSubmission(req models.SubmissionRequest) (
+// Package-level so both single and batch submission paths share it.
+func buildSubmission(req models.SubmissionRequest) (
 	*models.Submission, string, string, error,
 ) {
 	sourceCode, err := decodeIfBase64(req.SourceCode)
@@ -134,19 +136,37 @@ func (h *SubmissionHandler) buildSubmission(req models.SubmissionRequest) (
 
 // seedCacheAndPublish seeds the Redis cache and enqueues the submission.
 func (h *SubmissionHandler) seedCacheAndPublish(c *gin.Context, sub *models.Submission) {
+	if err := enqueueSubmission(c.Request.Context(), sub, h.subCache, h.languageRepo, h.queue, h.log); err != nil {
+		h.metrics.QueuePublishErrors.Inc()
+	}
+}
+
+// enqueueSubmission seeds the Redis cache with the initial state and publishes
+// the execution job. Package-level so the batch handler can reuse it without
+// depending on SubmissionHandler. Returns an error when publishing fails so
+// the caller can record metrics in its own namespace.
+func enqueueSubmission(
+	ctx context.Context,
+	sub *models.Submission,
+	subCache *cache.SubmissionCache,
+	languageRepo database.LanguageRepository,
+	q queue.Publisher,
+	log *zap.Logger,
+) error {
 	initialResp := models.SubmissionToResponse(sub, false)
-	_ = h.subCache.Set(c.Request.Context(), sub.Token, &initialResp)
+	_ = subCache.Set(ctx, sub.Token, &initialResp)
 
 	job := submissionToJob(sub)
-	if lang, err := h.languageRepo.GetByID(c.Request.Context(), sub.LanguageID); err == nil && lang != nil {
+	if lang, err := languageRepo.GetByID(ctx, sub.LanguageID); err == nil && lang != nil {
 		job.LanguageName = lang.Name
 	}
 
-	if err := h.queue.PublishJob(c.Request.Context(), job); err != nil {
-		h.log.Error("failed to publish submission",
+	if err := q.PublishJob(ctx, job); err != nil {
+		log.Error("failed to publish submission",
 			zap.String("token", sub.Token), zap.Error(err))
-		h.metrics.QueuePublishErrors.Inc()
+		return err
 	}
+	return nil
 }
 
 // submissionToJob converts a persisted Submission into an ExecutionJob for the queue.
@@ -155,23 +175,28 @@ func submissionToJob(sub *models.Submission) *models.ExecutionJob {
 	if sub.Stdin != nil {
 		stdin = *sub.Stdin
 	}
+	var batchID string
+	if sub.BatchID != nil {
+		batchID = *sub.BatchID
+	}
 	return &models.ExecutionJob{
-		SubmissionToken:    sub.Token,
-		LanguageID:         sub.LanguageID,
-		SourceCode:         sub.SourceCode,
-		Stdin:              stdin,
-		ExpectedOutput:     sub.ExpectedOutput,
-		CPUTimeLimit:       sub.CPUTimeLimit,
-		WallTimeLimit:      sub.WallTimeLimit,
-		MemoryLimit:        sub.MemoryLimit,
-		StackLimit:         sub.StackLimit,
-		MaxProcesses:       sub.MaxProcesses,
-		MaxFileSize:        sub.MaxFileSize,
-		CompilerOptions:    sub.CompilerOptions,
-		CommandLineArgs:    sub.CommandLineArgs,
-		CallbackURL:        sub.CallbackURL,
-		RetryCount:         0,
-		Priority:           0,
+		SubmissionToken: sub.Token,
+		LanguageID:      sub.LanguageID,
+		SourceCode:      sub.SourceCode,
+		Stdin:           stdin,
+		ExpectedOutput:  sub.ExpectedOutput,
+		CPUTimeLimit:    sub.CPUTimeLimit,
+		WallTimeLimit:   sub.WallTimeLimit,
+		MemoryLimit:     sub.MemoryLimit,
+		StackLimit:      sub.StackLimit,
+		MaxProcesses:    sub.MaxProcesses,
+		MaxFileSize:     sub.MaxFileSize,
+		CompilerOptions: sub.CompilerOptions,
+		CommandLineArgs: sub.CommandLineArgs,
+		CallbackURL:     sub.CallbackURL,
+		BatchID:         batchID,
+		RetryCount:      0,
+		Priority:        0,
 	}
 }
 
@@ -227,6 +252,64 @@ func (h *SubmissionHandler) GetSubmission(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// GetBatchSubmissions handles GET /submissions/batch/:tokens — retrieves
+// multiple submissions in one request. Tokens are comma-separated (max 20).
+// Found submissions are returned in request order; tokens that do not resolve
+// are omitted from the array. Returns 404 only when none of the tokens exist.
+func (h *SubmissionHandler) GetBatchSubmissions(c *gin.Context) {
+	tokens, err := parseTokenList(c.Param("tokens"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	responses := make([]models.SubmissionResponse, 0, len(tokens))
+	for _, token := range tokens {
+		if resp := h.getFromCache(c, token); resp != nil {
+			responses = append(responses, *resp)
+			continue
+		}
+		sub, err := h.submissionRepo.GetByToken(c.Request.Context(), token)
+		if err != nil {
+			h.log.Debug("batch get: token not found", zap.String("token", token))
+			continue
+		}
+		resp := models.SubmissionToResponse(sub, true)
+		_ = h.subCache.Set(c.Request.Context(), token, &resp)
+		responses = append(responses, resp)
+	}
+
+	if len(responses) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no submissions found for the given tokens"})
+		return
+	}
+	c.JSON(http.StatusOK, responses)
+}
+
+// parseTokenList splits a comma-separated token path segment, trims and
+// validates each as a UUID, and enforces the per-request cap.
+func parseTokenList(raw string) ([]string, error) {
+	parts := strings.Split(raw, ",")
+	tokens := make([]string, 0, len(parts))
+	for _, p := range parts {
+		t := strings.TrimSpace(p)
+		if t == "" {
+			continue
+		}
+		if _, err := uuid.Parse(t); err != nil {
+			return nil, errors.New("invalid token format: " + t)
+		}
+		tokens = append(tokens, t)
+	}
+	if len(tokens) == 0 {
+		return nil, errors.New("at least one token is required")
+	}
+	if len(tokens) > defaultMaxBatchSize {
+		return nil, fmt.Errorf("maximum %d tokens per request", defaultMaxBatchSize)
+	}
+	return tokens, nil
+}
+
 // getFromCache returns a cached SubmissionResponse or nil on miss/error.
 func (h *SubmissionHandler) getFromCache(c *gin.Context, token string) *models.SubmissionResponse {
 	cached, err := h.subCache.Get(c.Request.Context(), token)
@@ -251,8 +334,14 @@ func (h *SubmissionHandler) CreateBatchSubmissions(c *gin.Context) {
 		return
 	}
 
-	if len(req.Submissions) > 20 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "maximum 20 submissions per batch"})
+	maxBatchSize := h.cfg.Batch.MaxSize
+	if maxBatchSize <= 0 {
+		maxBatchSize = defaultMaxBatchSize
+	}
+	if len(req.Submissions) > maxBatchSize {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("maximum %d submissions per batch", maxBatchSize),
+		})
 		return
 	}
 
@@ -271,7 +360,7 @@ func (h *SubmissionHandler) processBatch(c *gin.Context, reqs []models.Submissio
 	tokens := make([]string, 0, len(reqs))
 
 	for i := range reqs {
-		sub, _, _, err := h.buildSubmission(reqs[i])
+		sub, _, _, err := buildSubmission(reqs[i])
 		if err != nil {
 			return nil, err
 		}
@@ -361,4 +450,3 @@ func decodeIfBase64(s string) (string, error) {
 	}
 	return s, nil
 }
-

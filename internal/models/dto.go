@@ -47,7 +47,9 @@ type StatusInfo struct {
 
 // BatchSubmissionRequest holds multiple submission requests.
 type BatchSubmissionRequest struct {
-	Submissions []SubmissionRequest `json:"submissions" binding:"required,min=1,max=20,dive"`
+	// The upper bound is enforced at the handler from config (batch.max_size /
+	// BATCH_MAX_SIZE), not as a fixed binding tag, so it can be tuned per env.
+	Submissions []SubmissionRequest `json:"submissions" binding:"required,min=1,dive"`
 }
 
 // BatchSubmissionResponse holds multiple submission tokens.
@@ -66,17 +68,17 @@ type PaginatedSubmissionsResponse struct {
 // SubmissionToResponse converts a Submission DB model to an API response DTO.
 func SubmissionToResponse(s *Submission, includeSource bool) SubmissionResponse {
 	resp := SubmissionResponse{
-		Token:      s.Token,
-		LanguageID: s.LanguageID,
-		Stdout:     s.Stdout,
-		Stderr:     s.Stderr,
+		Token:         s.Token,
+		LanguageID:    s.LanguageID,
+		Stdout:        s.Stdout,
+		Stderr:        s.Stderr,
 		CompileOutput: s.CompileOutput,
-		ExitCode:   s.ExitCode,
-		WallTime:   s.WallTime,
-		CPUTime:    s.Time,
-		Memory:     s.Memory,
-		CreatedAt:  s.CreatedAt,
-		FinishedAt: s.FinishedAt,
+		ExitCode:      s.ExitCode,
+		WallTime:      s.WallTime,
+		CPUTime:       s.Time,
+		Memory:        s.Memory,
+		CreatedAt:     s.CreatedAt,
+		FinishedAt:    s.FinishedAt,
 		Status: StatusInfo{
 			ID:          s.StatusID,
 			Description: StatusDescriptions[s.StatusID],
@@ -131,6 +133,13 @@ type HealthResponse struct {
 type StatusResponse struct {
 	ID          int    `json:"id"`
 	Description string `json:"description"`
+}
+
+// SetLanguageActiveRequest is the body for PATCH /languages/:id/active.
+// IsActive is a pointer so that an explicit `false` is distinguishable from a
+// missing field (binding:"required" rejects a nil / absent value).
+type SetLanguageActiveRequest struct {
+	IsActive *bool `json:"is_active" binding:"required"`
 }
 
 // LanguageResponse is the response DTO for a single language.

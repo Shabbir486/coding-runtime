@@ -1,0 +1,387 @@
+# AWS deployment — command log
+
+A chronological log of every AWS/eksctl/kubectl command run while deploying Code
+Runtime to EKS, with purpose and outcome. Region: **ap-southeast-2**, account
+**768054003064**. Append new commands as they run.
+
+---
+
+## Phase 0 — tooling (local)
+```bash
+brew install awscli eksctl helm        # aws 2.35.9, eksctl 0.227.0, helm v4.2.2
+```
+
+## Phase 1 — identity & discovery (read-only)
+```bash
+# Who am I / which account
+aws sts get-caller-identity
+#   → Account 768054003064, Arn arn:aws:iam::768054003064:root   (⚠ root — replace with IAM admin, delete root keys after)
+
+aws configure get region
+#   → ap-southeast-2
+
+# Confirm the SQS job queue is reachable
+aws sqs get-queue-attributes \
+  --queue-url https://sqs.ap-southeast-2.amazonaws.com/768054003064/code-submission-processing-queue \
+  --attribute-names ApproximateNumberOfMessages QueueArn --region ap-southeast-2
+#   → ApproximateNumberOfMessages 0, ARN arn:aws:sqs:ap-southeast-2:768054003064:code-submission-processing-queue
+
+# Where does the database live? (EKS must share its VPC to reach it privately)
+aws rds describe-db-instances --region ap-southeast-2 \
+  --query 'DBInstances[].{id:DBInstanceIdentifier,engine:Engine,status:DBInstanceStatus,endpoint:Endpoint.Address,vpc:DBSubnetGroup.VpcId,public:PubliclyAccessible}'
+#   → coderuntime-prod (mysql, available) endpoint coderuntime-prod.cziyoeg0oioy.ap-southeast-2.rds.amazonaws.com
+#     vpc-0c19448c00a89ccb8, PubliclyAccessible=false
+
+aws rds describe-db-clusters --region ap-southeast-2 \
+  --query 'DBClusters[].{id:DBClusterIdentifier,status:Status,endpoint:Endpoint}'
+#   → database-1 (aurora) database-1.cluster-cziyoeg0oioy.ap-southeast-2.rds.amazonaws.com
+
+aws ec2 describe-vpcs --region ap-southeast-2 \
+  --query 'Vpcs[].{id:VpcId,cidr:CidrBlock,default:IsDefault}'
+#   → ONLY vpc-0c19448c00a89ccb8 (172.31.0.0/16, default)  ← DB lives here
+
+aws ec2 describe-subnets --region ap-southeast-2 \
+  --filters Name=vpc-id,Values=vpc-0c19448c00a89ccb8 \
+  --query 'Subnets[].{id:SubnetId,az:AvailabilityZone,cidr:CidrBlock,public:MapPublicIpOnLaunch}'
+#   → subnet-09b8927e9af369a62 (2a, 172.31.0.0/20, public)
+#     subnet-09c936e6e575c677a (2b, 172.31.32.0/20, public)
+#     subnet-0bdff67df02afc941 (2c, 172.31.16.0/20, public)
+
+aws rds describe-db-instances --region ap-southeast-2 --db-instance-identifier coderuntime-prod \
+  --query 'DBInstances[0].VpcSecurityGroups[].VpcSecurityGroupId' --output text
+#   → sg-089caf4f4cdf7be6e   (RDS security group — must allow 3306 from EKS nodes)
+```
+
+### Decisions from Phase 1
+- **EKS goes in the existing default VPC** `vpc-0c19448c00a89ccb8` using the 3 public
+  subnets, so pods reach the private RDS on the same network (no VPC peering).
+- After the cluster exists, **allow 3306 on the RDS SG (`sg-089caf4f4cdf7be6e`)
+  from the EKS node security group** (or the VPC CIDR 172.31.0.0/16).
+
+## Phase 2 — create EKS cluster   (PENDING — awaiting cost go-ahead)
+```bash
+# (to be run) eksctl create cluster -f deployments/kubernetes/eks/cluster.yaml
+```
+<!-- append actual commands + outputs here as they run -->
+
+## Phase 2 — create EKS cluster   (RUNNING)
+```bash
+cd deployments/kubernetes/eks
+eksctl create cluster -f cluster.yaml      # ~15-20 min; reuses default VPC, 2x m6i.large system nodegroup, IRSA
+```
+```bash
+# check status - Still in progress — nodegroup status CREATING
+aws eks describe-nodegroup --cluster-name coderuntime --nodegroup-name system --region ap-southeast-2 --query 'nodegroup.status' --output text 2>&1
+
+## Phase 2c — nodegroup blocked by Free-Tier restriction
+```bash
+# Symptom: nodegroup CREATE failed, 0 EC2 instances launched.
+aws autoscaling describe-scaling-activities --auto-scaling-group-name <eks-system-asg> --region ap-southeast-2
+#   → "The specified instance type is not eligible for Free Tier."
+# This account is restricted to FREE-TIER-ELIGIBLE instance types only.
+aws ec2 describe-instance-types --region ap-southeast-2 \
+  --filters Name=free-tier-eligible,Values=true \
+  --query 'InstanceTypes[].{type:InstanceType,vcpu:VCpuInfo.DefaultVCpus,memMiB:MemoryInfo.SizeInMiB}'
+#   → t3.micro/small, t4g.micro/small, c7i-flex.large(4GB), m7i-flex.large(8GB)
+# FIX: set system nodegroup instanceType: m7i-flex.large (free-tier eligible, 8GB).
+#      (Upgrade account to a paid plan for m6i.large + larger Karpenter nodes.)
+eksctl delete nodegroup --cluster coderuntime --name system --region ap-southeast-2 --wait
+eksctl create nodegroup -f cluster.yaml      # with m7i-flex.large
+```
+
+## How the nodegroup failure was diagnosed (the trail)
+Work from the symptom inward: eksctl error → CloudFormation → EKS nodegroup
+health → EC2 instances → Auto Scaling Group activity (the real cause lives here).
+
+```bash
+# 1. eksctl said the cluster/nodegroup stack failed — get the CFN failure reason.
+#    (First failure was a race:)
+aws cloudformation describe-stack-events --region ap-southeast-2 \
+  --stack-name eksctl-coderuntime-nodegroup-system \
+  --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`].[LogicalResourceId,ResourceStatusReason]' --output text
+#   → "Cluster 'coderuntime' is not in ACTIVE status"  (nodegroup raced cluster UPDATING)
+
+# 2. After retry it timed out ("exceeded max wait"). Check the nodegroup's own health:
+aws eks describe-nodegroup --cluster-name coderuntime --nodegroup-name system \
+  --region ap-southeast-2 --query 'nodegroup.{status:status,health:health.issues}'
+#   → status CREATING, health [] (no node-join errors → nodes never even launched)
+
+# 3. Did any EC2 instances actually launch for this nodegroup?
+aws ec2 describe-instances --region ap-southeast-2 \
+  --filters "Name=tag:eks:nodegroup-name,Values=system" "Name=instance-state-name,Values=running,pending" \
+  --query 'Reservations[].Instances[].{id:InstanceId,state:State.Name}'
+#   → []  (ZERO instances — the ASG can't launch them → check ASG activity)
+
+# 4. Find the nodegroup's Auto Scaling Group, then read its scaling activities —
+#    THIS is where EC2 launch errors surface.
+ASG=$(aws autoscaling describe-auto-scaling-groups --region ap-southeast-2 \
+  --query "AutoScalingGroups[?contains(Tags[?Key=='eks:nodegroup-name'].Value | [0],'system')].AutoScalingGroupName | [0]" --output text)
+aws autoscaling describe-scaling-activities --region ap-southeast-2 \
+  --auto-scaling-group-name "$ASG" --max-records 4 \
+  --query 'Activities[].{status:StatusCode,cause:StatusMessage}'
+#   → "Could not launch On-Demand Instances ... not eligible for Free Tier."  ← ROOT CAUSE
+
+# 5. Rule out a quota red-herring, then list what IS allowed.
+aws service-quotas get-service-quota --region ap-southeast-2 \
+  --service-code ec2 --quota-code L-1216C47A   # On-Demand Standard vCPUs → 16 (fine, not the issue)
+aws ec2 describe-instance-types --region ap-southeast-2 \
+  --filters Name=free-tier-eligible,Values=true \
+  --query 'InstanceTypes[].{type:InstanceType,vcpu:VCpuInfo.DefaultVCpus,memMiB:MemoryInfo.SizeInMiB}'
+#   → m7i-flex.large (8GB) chosen.
+```
+**Lesson:** for "node won't join / nodegroup CREATE failed", the EC2 *launch* error is
+not in eksctl/CFN/EKS — it's in **ASG scaling activities**. Always drill: CFN events →
+nodegroup health → EC2 instances present? → ASG activities.
+
+## Phase 3 — nodegroup (m7i-flex.large) + RDS connectivity
+```bash
+eksctl create nodegroup -f cluster.yaml          # 2x m7i-flex.large joined as Ready (v1.32)
+# Allow the app to reach RDS: open 3306 on the DB SG from the EKS node/cluster SG.
+NODE_SG=$(aws ec2 describe-instances --region ap-southeast-2 \
+  --filters Name=tag:eks:nodegroup-name,Values=system Name=instance-state-name,Values=running \
+  --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' --output text)   # sg-0d05392d14f525ff9
+aws ec2 authorize-security-group-ingress --region ap-southeast-2 \
+  --group-id sg-089caf4f4cdf7be6e --protocol tcp --port 3306 --source-group "$NODE_SG"
+```
+
+## Phase 4 — push images to ECR (nodes are amd64; local images are arm64 → rebuild)
+```bash
+ACCOUNT=768054003064; REGION=ap-southeast-2; ECR=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+for s in api worker queue-manager; do aws ecr create-repository --repository-name coderuntime/$s --region $REGION || true; done
+aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ECR
+docker buildx build --platform linux/amd64 -f docker/Dockerfile.api           -t $ECR/coderuntime/api:v1 --push .
+docker buildx build --platform linux/amd64 -f docker/Dockerfile.worker        -t $ECR/coderuntime/worker:v1 --push .
+docker buildx build --platform linux/amd64 -f docker/Dockerfile.queue-manager -t $ECR/coderuntime/queue-manager:v1 --push .
+```
+
+## Phase 5 — deploy app (api + queue-manager + redis; worker held)
+```bash
+kubectl apply -f - <<SC   # fast-ssd StorageClass on EKS = EBS gp3
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata: {name: fast-ssd}
+provisioner: ebs.csi.aws.com
+parameters: {type: gp3}
+volumeBindingMode: WaitForFirstConsumer
+SC
+# secrets: DB(RDS coderuntime-prod)+JWT+redis pwd; NO aws-credentials (IRSA)
+kubectl create secret generic api-secrets -n coderuntime --from-literal=DATABASE_HOST=<rds> ... 
+kubectl apply -k .                       # base (ECR images via kustomization)
+kubectl label ns coderuntime pod-security.kubernetes.io/enforce=privileged --overwrite
+kubectl -n coderuntime patch limitrange coderuntime-limits ... min 10m/16Mi
+# re-annotate IRSA SAs (namespace.yaml clobbers them), strip AWS_* env (use IRSA), hold worker
+for sa in api-gateway worker queue-manager; do kubectl -n coderuntime annotate sa $sa eks.amazonaws.com/role-arn=<arn> --overwrite; done
+for d in api-gateway queue-manager worker; do kubectl -n coderuntime get deploy $d -o json | jq 'del AWS_* env' | kubectl apply -f -; done
+kubectl -n coderuntime scale deployment worker --replicas=0     # AL2023 has no docker.sock
+# api anti-affinity required→preferred (2-node cluster, avoids rollout deadlock)
+```
+
+## Phase 5a — FIX: EBS CSI driver missing (redis PVC stuck Pending)
+```bash
+# Symptom: kubectl get pvc → redis-data-redis-0 Pending; no ebs-csi pods;
+#          aws eks describe-addon aws-ebs-csi-driver → "No addon found"
+# (the first failed cluster-create skipped the addon). Install with IRSA:
+eksctl create iamserviceaccount --cluster coderuntime --region ap-southeast-2 \
+  --namespace kube-system --name ebs-csi-controller-sa \
+  --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
+  --role-only --role-name AmazonEKS_EBS_CSI_DriverRole_coderuntime --approve
+eksctl create addon --cluster coderuntime --region ap-southeast-2 --name aws-ebs-csi-driver \
+  --service-account-role-arn arn:aws:iam::768054003064:role/AmazonEKS_EBS_CSI_DriverRole_coderuntime --force
+```
+
+## Phase 5b — FIX: RDS database didn't exist (api Error 1049)
+```bash
+# api connected to RDS but: Error 1049 (42000): Unknown database 'coderuntime'.
+# App auto-creates TABLES, not the DATABASE. RDS instance had no initial DB.
+# Create it from an in-cluster pod (laptop can't reach the private RDS):
+kubectl run mysql-init -n coderuntime --restart=Never --image=mysql:8 --command -- \
+  mysql -h coderuntime-prod.cziyoeg0oioy.ap-southeast-2.rds.amazonaws.com \
+  -u coderuntime -pcoderuntime123 -e "CREATE DATABASE IF NOT EXISTS coderuntime;"
+kubectl -n coderuntime rollout restart deployment/api-gateway   # → migrates + seeds
+```
+
+## ✅ CORE LIVE ON EKS (keyless / IRSA)
+- api-gateway 2/2 → RDS (coderuntime-prod, private) migrated+seeded, → Redis connected
+- queue-manager 2/2 → SQS depth poll via IRSA: code_runtime_queue_depth{stream=submissions}=0
+- redis 2/2 (EBS gp3)
+- NO aws-credentials secret anywhere — all SQS access via IRSA web-identity roles.
+
+## TODO — worker execution + autoscaling
+- Worker held at 0: AL2023 nodes use containerd, no /var/run/docker.sock (the DooD gotcha).
+  Options: (A) install dockerd on worker nodes via Karpenter EC2NodeClass userData (smallest
+  change), or (B) port the sandbox to containerd/CRI.
+- KEDA not yet installed on EKS (worker SQS-backlog autoscaling).
+- Karpenter worker NodePool: must constrain to free-tier instance types OR upgrade the account.
+
+## Phase 6 — worker (DinD) + KEDA on EKS
+```bash
+helm upgrade --install keda kedacore/keda -n keda --set serviceAccount.operator.name=keda-operator
+#   (SA pre-created by eksctl → add Helm ownership labels/annotations so Helm adopts it)
+kubectl apply -f eks/keda-scaledobject-eks.yaml      # KEDA SQS scaler, IRSA (podIdentity)
+# Worker on AL2023 (containerd, no host docker.sock) → DinD sidecar over TCP:
+#   - add docker:27-dind sidecar (privileged, runAsUser 0) listening tcp://0.0.0.0:2375
+#   - worker env DOCKER_HOST=tcp://localhost:2375  (SDK client.FromEnv reads DOCKER_HOST)
+#   - emptyDir for /var/lib/docker + sandbox; drop hostPath docker-socket
+kubectl -n coderuntime apply -f /tmp/worker-eks.json
+# Removed imagePullSecrets (ECR pulls use node IAM, not a pull secret).
+```
+RESULT: worker 2/2 (worker+dind), dind reachable, "worker consuming from sqs" via IRSA,
+KEDA ScaledObject READY (scales worker on SQS backlog). Sandbox EXECUTION still needs the
+34 code-runtime-* images pushed to ECR + dind ECR auth (prewarm shows pull-access-denied).
+
+## Phase 7 — make sandbox EXECUTION work from private ECR (the full fix)
+Approach chosen: "Custom images to private ECR + dind registry auth" (full 40-language coverage).
+The runtime images stay referenced locally by their bare tag `code-runtime-<lang>:latest`; the
+worker's ImagePool transparently pulls them from ECR and the dind daemon executes them.
+
+### 7a. Build + push runtime images to ECR (amd64, the node arch)
+```bash
+REGION=ap-southeast-2; ACCOUNT=768054003064
+REGISTRY=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $REGISTRY
+# one repo per language, then build+push (linux/amd64 to match m7i-flex.large nodes):
+for l in <langs>; do
+  aws ecr describe-repositories --repository-names code-runtime-$l --region $REGION >/dev/null 2>&1 \
+    || aws ecr create-repository --repository-name code-runtime-$l --region $REGION >/dev/null
+  docker buildx build --platform linux/amd64 -t $REGISTRY/code-runtime-$l:latest --push runtime-images/$l
+done
+# helper: scripts/build-push-runtime-ecr.sh  (LANGS="bash golang nodejs ..." bash scripts/build-push-runtime-ecr.sh)
+```
+
+### 7b. BUG #1 — registry env var name (pull ref was un-prefixed)
+Symptom: worker log `{"msg":"pulling docker image","image":"code-runtime-bash:latest","ref":"code-runtime-bash:latest"}`
+— `ref` NOT prefixed with the ECR registry, so `resolvePullRef` saw an empty `p.registry`
+→ `pull access denied for code-runtime-bash`.
+Root cause: the Viper config field is `DockerConfig.Registry` (`mapstructure:"registry"` under the
+`docker` section), so the env keys MUST be `CODERUNTIME_DOCKER_REGISTRY` / `CODERUNTIME_DOCKER_REGISTRY_AUTH`.
+I had used `CODERUNTIME_REGISTRY` / `CODERUNTIME_REGISTRY_AUTH` (missing the `DOCKER_` segment).
+Fix — recreate the secret with the correct keys and wire it via envFrom on the worker:
+```bash
+TOKEN=$(aws ecr get-login-password --region ap-southeast-2)
+XAUTH=$(python3 -c "import json,base64,sys;print(base64.b64encode(json.dumps({'username':'AWS','password':sys.argv[1],'serveraddress':sys.argv[2]}).encode()).decode())" "$TOKEN" "$REGISTRY")
+kubectl -n coderuntime create secret generic ecr-registry-auth \
+  --from-literal=CODERUNTIME_DOCKER_REGISTRY="$REGISTRY" \
+  --from-literal=CODERUNTIME_DOCKER_REGISTRY_AUTH="$XAUTH" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n coderuntime rollout restart deployment/worker
+```
+NOTE: the X-Registry-Auth token (ECR password) expires ~12h — re-run the above to refresh.
+RESULT: prewarm/pull ref now correctly resolves to
+`768054003064.dkr.ecr.ap-southeast-2.amazonaws.com/code-runtime-<lang>:latest`.
+
+### 7c. BUG #2 — DinD bind-mount source not visible to the daemon
+Symptom: `invalid mount config for type "bind": bind source path does not exist: /tmp/sandbox/<uuid>`.
+Root cause: the worker writes per-execution source files to its host workdir and bind-mounts that
+dir into the sandbox container — but the BIND IS CREATED BY THE DIND DAEMON, which has its own
+filesystem. The dir existed in the worker container, not in dind.
+First attempt: share an emptyDir named `sandbox` and mount it at `/tmp/sandbox` in BOTH worker and
+dind. STILL FAILED — `/proc/mounts` in dind showed `/tmp/sandbox` (the shared emptyDir) mounted
+FIRST, then a `tmpfs` mounted over `/tmp` (docker:dind sets this up), SHADOWING `/tmp/sandbox`.
+Verified: a file written in worker's /tmp/sandbox was invisible in dind's /tmp/sandbox.
+Fix: move the host sandbox workdir OUTSIDE `/tmp` so nothing shadows it.
+  - worker env `CODERUNTIME_WORKER_TMP_DIR=/sandbox-host` (config key `worker.tmp_dir`; this is the
+    host base dir the sandbox bind-mounts FROM — NOT `docker.work_dir`, which is the in-container target).
+  - mount the shared `sandbox` emptyDir at `/sandbox-host` in BOTH worker and dind containers.
+```bash
+kubectl -n coderuntime patch deployment worker --type=json -p='[
+  {"op":"replace","path":"/spec/template/spec/containers/0/volumeMounts/0/mountPath","value":"/sandbox-host"},
+  {"op":"replace","path":"/spec/template/spec/containers/1/volumeMounts/1/mountPath","value":"/sandbox-host"},
+  {"op":"add","path":"/spec/template/spec/containers/0/env/-","value":{"name":"CODERUNTIME_WORKER_TMP_DIR","value":"/sandbox-host"}}
+]'
+# verify cross-container share:
+POD=$(kubectl -n coderuntime get pod -l app.kubernetes.io/name=worker -o jsonpath='{.items[0].metadata.name}')
+kubectl -n coderuntime exec $POD -c worker -- sh -c 'mkdir -p /sandbox-host/probe && echo ok > /sandbox-host/probe/f.txt'
+kubectl -n coderuntime exec $POD -c dind   -- cat /sandbox-host/probe/f.txt   # -> ok  (DIND-SEES-FILE)
+```
+(worker-dind-patch.yaml updated to add the dind `sandbox` mount as the source of truth.)
+
+### 7d. API auth for testing
+- API key header is `X-Auth-Token` (sha256(rawkey) looked up in api_keys); JWT via `Authorization: Bearer`.
+- Login (seeded user): `POST /auth/token {"email":"dev@coderuntime.io","password":"Admin123!"}` -> access_token.
+- Routes are at ROOT (`/submissions`, `/languages`, ...). The `/code-runtime` prefix is added by the
+  ingress/gateway, not the app. Submissions require numeric `language_id` (not `language`).
+
+### 7e. RESULT — end-to-end execution from ECR CONFIRMED
+```
+bash   (id 1)  -> Accepted, stdout "hello-from-ecr-bash\nline2\n", exit 0
+golang (id 13) -> Accepted, stdout "hello-go\n"
+nodejs (id 17) -> Accepted, stdout "hello-node 4\n"
+```
+Remaining: build+push the other ~31 runtime images to ECR, then run scripts/test_languages.py
+across all active languages.
+
+### 7f. BUG #3 — DB languages (mysql/postgresql/mongodb) bypassed the ECR pull
+Symptom (ID 38/39/40): `db_runtime: create container: Error response from daemon:
+No such image: code-runtime-mysql:latest` (NOT a pull/auth error).
+Root cause: `internal/runtime/db_runtime.go` `runEphemeralDB()` calls the Docker SDK
+`ContainerCreate` directly with the bare image name and never pulls — only the SANDBOX
+path (`DockerSandbox.Execute` -> `ImagePool.EnsureImage`) does the registry-aware
+pull+retag. So the bare `code-runtime-<db>:latest` was never fetched from ECR.
+Fix: before ContainerCreate, ensure the image via the pool (pulls
+`<registry>/code-runtime-<db>:latest`, retags to the bare name):
+```go
+if err := r.docker.ImagePool().EnsureImage(runCtx, spec.image); err != nil {
+    return nil, fmt.Errorf("db_runtime: ensure image %q: %w", spec.image, err)
+}
+```
+Rebuilt + pushed worker image as `coderuntime/worker:v2` and rolled out:
+```bash
+docker buildx build --platform linux/amd64 -f docker/Dockerfile.worker \
+  -t 768054003064.dkr.ecr.ap-southeast-2.amazonaws.com/coderuntime/worker:v2 --push .
+kubectl -n coderuntime set image deployment/worker \
+  worker=768054003064.dkr.ecr.ap-southeast-2.amazonaws.com/coderuntime/worker:v2
+```
+RESULT: mysql(38)->Accepted "2", postgresql(39)->Accepted "2", mongodb(40)->Accepted "4".
+
+### 7g. Public endpoint (Classic ELB)
+api-gateway was ClusterIP only; ingress had no controller. Exposed via a plain
+`type: LoadBalancer` Service (in-tree AWS cloud provider -> Classic ELB; the AWS Load
+Balancer Controller is NOT installed, so the `aws-load-balancer-type: external` annotation
+must be omitted). Endpoint (HTTP:80, no TLS yet):
+  http://aa6f9d7b568b4425f84ea155a296db33-71808099.ap-southeast-2.elb.amazonaws.com
+  /health -> {"status":"ok","services":{"mysql":"ok","redis":"ok"}}
+
+## Phase 8 — autoscaling validation + worker max 20 (KEDA -> cluster-autoscaler)
+Goal: verify end-to-end autoscaling and raise the worker ceiling to 20 pods.
+
+### 8a. KEDA worker max 1 -> 20
+```bash
+kubectl -n coderuntime patch scaledobject worker --type=merge -p '{"spec":{"maxReplicaCount":20}}'
+```
+Trigger = aws-sqs-queue, queueLength target=50 msgs/pod => desired = ceil(backlog/50), capped 20.
+NOTE: with wait=true at client concurrency C, in-flight SQS msgs ~= C, so backlog stays < 50/pod
+and workers DON'T scale. Drive scaling with an ingestion burst (--no-wait) that floods the queue.
+
+### 8b. Node autoscaling (required for >~5 worker pods)
+Each worker pod = worker(500m) + dind(250m) = 750m CPU; m7i-flex.large ~1930m allocatable
+=> ~2 worker pods/node. 20 pods => ~10-11 nodes. So:
+```bash
+# raise managed nodegroup max 4 -> 12
+aws eks update-nodegroup-config --cluster-name coderuntime --nodegroup-name system \
+  --scaling-config minSize=2,maxSize=12,desiredSize=2 --region ap-southeast-2
+# IAM policy + IRSA SA for cluster-autoscaler
+aws iam create-policy --policy-name coderuntime-cluster-autoscaler --policy-document file://ca-policy.json
+eksctl create iamserviceaccount --cluster=coderuntime --region ap-southeast-2 \
+  --namespace=kube-system --name=cluster-autoscaler \
+  --attach-policy-arn=arn:aws:iam::768054003064:policy/coderuntime-cluster-autoscaler \
+  --override-existing-serviceaccounts --approve
+# deploy cluster-autoscaler (autodiscovery via ASG tags k8s.io/cluster-autoscaler/{enabled,coderuntime})
+kubectl apply -f eks/cluster-autoscaler.yaml   # image v1.32.0; RBAC incl volumeattachments + status cm Role
+```
+The eksctl managed nodegroup ASG is already tagged for autodiscovery.
+
+### 8c. BUG #4 — dind startup race => new worker pods CrashLoopBackOff
+Symptom on scale-up: `worker: fatal: sandbox: docker daemon unreachable: Cannot connect to the
+Docker daemon at tcp://localhost:2375`. The worker fatals if the dind sidecar isn't accepting
+connections yet; every new pod crash-loops until timing aligns (slows scale-up badly).
+Fix: make dind a NATIVE SIDECAR — move it to initContainers with restartPolicy: Always and a
+startupProbe (tcpSocket 2375). k8s then starts dind and waits for the probe BEFORE starting the
+worker container. (worker connects via DOCKER_HOST=tcp://localhost:2375; dind listens
+--host=tcp://0.0.0.0:2375.) After this, scale-up to 20 pods showed 0 crashes.
+
+### 8d. RESULT — measured
+- Ingestion burst: 1000 submissions -> 1000 accepted (100%), 166 req/s, p50 0.28s.
+- KEDA: worker 1 -> 20 pods (backlog ~950 / 50).
+- cluster-autoscaler: ASG 2 -> 11 nodes (max 12); pods Pending -> Running as nodes joined.
+- Backlog 946 -> 0 with 16 workers running and 0 crashes (post native-sidecar fix).
+- Scale-down: KEDA cooldown 120s -> worker back to 1; CA scale-down-unneeded 2m -> nodes back to 2.

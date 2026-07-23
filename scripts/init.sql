@@ -1,24 +1,24 @@
 -- =============================================================================
--- CodeRuntime — PostgreSQL Initialization Script
+-- CodeRuntime — MySQL Initialization Script
 -- =============================================================================
--- Executed once when the Postgres container first starts (via initdb hook).
--- Table DDL is entirely owned by GORM AutoMigrate at API startup; this file
--- only installs extensions and grants the minimum privileges the app role needs
--- before any tables exist.
+-- Executed once when the MySQL container first starts (via the
+-- /docker-entrypoint-initdb.d hook), after MYSQL_DATABASE / MYSQL_USER have
+-- been created. Table DDL is entirely owned by GORM AutoMigrate at API
+-- startup; this file only ensures the database exists with the right charset
+-- and that the application user has full privileges on it before any tables
+-- are created.
+--
+-- AWS RDS note: RDS does not run this init hook. There, create the database
+-- and grant privileges once via the master user:
+--   CREATE DATABASE coderuntime CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+--   GRANT ALL PRIVILEGES ON coderuntime.* TO 'coderuntime'@'%';
 -- =============================================================================
 
--- uuid_generate_v4() is used by the Go layer to generate submission tokens.
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE DATABASE IF NOT EXISTS coderuntime
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_0900_ai_ci;
 
--- pg_stat_statements enables per-query execution statistics, used by Grafana
--- dashboards and performance investigations.
-CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
-
--- btree_gin allows multi-column GIN indexes that mix equality and range
--- predicates — useful for (language_id, created_at) query patterns.
-CREATE EXTENSION IF NOT EXISTS "btree_gin";
-
--- Give the application role full control over the database so GORM
--- AutoMigrate can CREATE, ALTER, and DROP tables on startup without a
--- separate migration user.
-GRANT ALL PRIVILEGES ON DATABASE coderuntime TO coderuntime;
+-- Give the application user full control of the database so GORM AutoMigrate
+-- can CREATE / ALTER / DROP tables on startup without a separate migration user.
+GRANT ALL PRIVILEGES ON coderuntime.* TO 'coderuntime'@'%';
+FLUSH PRIVILEGES;

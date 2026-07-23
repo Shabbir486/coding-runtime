@@ -1,0 +1,750 @@
+{
+  "info": {
+    "name": "Code Runtime \u2013 Active Languages",
+    "description": "Auth + active-language submissions (with stdin test cases) + assertions. Run 'Auth \u2013 Get Token' first; it stores {{token}} for the rest.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://aa6f9d7b568b4425f84ea155a296db33-71808099.ap-southeast-2.elb.amazonaws.com",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "email",
+      "value": "dev@coderuntime.io",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Admin123!",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth \u2013 Get Token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "var r = pm.response.json();",
+              "pm.collectionVariables.set('token', r.access_token);",
+              "pm.test('got token', () => pm.expect(r.access_token).to.be.a('string'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/auth/token",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "auth",
+            "token"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "System \u2013 Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Languages \u2013 List active",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/languages?isActive=true",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "languages"
+          ],
+          "query": [
+            {
+              "key": "isActive",
+              "value": "true"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Languages \u2013 List inactive",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/languages?isActive=false",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "languages"
+          ],
+          "query": [
+            {
+              "key": "isActive",
+              "value": "false"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Admin \u2013 Deactivate language (id=41)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/languages/41",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "languages",
+            "41"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"is_active\": false\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Admin \u2013 Activate language (id=41)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/languages/41",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "languages",
+            "41"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"is_active\": true\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Submissions (active languages, with stdin)",
+      "item": [
+        {
+          "name": "C (GCC) (id=2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var r = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect((r.status||{}).description).to.eql('Accepted'));",
+                  "pm.test('output', () => pm.expect(r.stdout||'').to.include(\"7\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/submissions?wait=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_id\": 2,\n  \"source_code\": \"#include <stdio.h>\\nint main(){ int a,b; if(scanf(\\\"%d %d\\\",&a,&b)!=2) return 1; printf(\\\"%d\\\\n\\\", a+b); return 0; }\",\n  \"stdin\": \"3 4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "C++ (GCC) (id=3)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var r = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect((r.status||{}).description).to.eql('Accepted'));",
+                  "pm.test('output', () => pm.expect(r.stdout||'').to.include(\"7\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/submissions?wait=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_id\": 3,\n  \"source_code\": \"#include <iostream>\\nint main(){ int a,b; std::cin >> a >> b; std::cout << (a+b) << std::endl; }\",\n  \"stdin\": \"3 4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Java (OpenJDK 21) (id=16)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var r = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect((r.status||{}).description).to.eql('Accepted'));",
+                  "pm.test('output', () => pm.expect(r.stdout||'').to.include(\"7\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/submissions?wait=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_id\": 16,\n  \"source_code\": \"import java.util.Scanner;\\npublic class Main { public static void main(String[] a){\\n  Scanner s = new Scanner(System.in);\\n  System.out.println(s.nextInt() + s.nextInt());\\n} }\",\n  \"stdin\": \"3 4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "JavaScript (Node 22) (id=17)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var r = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect((r.status||{}).description).to.eql('Accepted'));",
+                  "pm.test('output', () => pm.expect(r.stdout||'').to.include(\"7\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/submissions?wait=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_id\": 17,\n  \"source_code\": \"const [a,b] = require(\\\"fs\\\").readFileSync(0,\\\"utf8\\\").trim().split(/\\\\s+/).map(Number);\\nconsole.log(a + b);\",\n  \"stdin\": \"3 4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "TypeScript (5.6) (id=35)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var r = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect((r.status||{}).description).to.eql('Accepted'));",
+                  "pm.test('output', () => pm.expect(r.stdout||'').to.include(\"7\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/submissions?wait=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_id\": 35,\n  \"source_code\": \"const nums: number[] = require(\\\"fs\\\").readFileSync(0,\\\"utf8\\\").trim().split(/\\\\s+/).map(Number);\\nconsole.log(nums[0] + nums[1]);\",\n  \"stdin\": \"3 4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Python (3.12) (id=29)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var r = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect((r.status||{}).description).to.eql('Accepted'));",
+                  "pm.test('output', () => pm.expect(r.stdout||'').to.include(\"7\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/submissions?wait=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_id\": 29,\n  \"source_code\": \"a, b = map(int, input().split())\\nprint(a + b)\",\n  \"stdin\": \"3 4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "MySQL (8.0) (id=38)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var r = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect((r.status||{}).description).to.eql('Accepted'));",
+                  "pm.test('output', () => pm.expect(r.stdout||'').to.include(\"7\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/submissions?wait=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_id\": 38,\n  \"source_code\": \"SELECT 3 + 4 AS result;\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "PostgreSQL (16) (id=39)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var r = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect((r.status||{}).description).to.eql('Accepted'));",
+                  "pm.test('output', () => pm.expect(r.stdout||'').to.include(\"7\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/submissions?wait=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_id\": 39,\n  \"source_code\": \"SELECT 3 + 4 AS result;\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Web (HTML/CSS/JS) \u2014 calculator (id=41)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var r = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect((r.status||{}).description).to.eql('Accepted'));",
+                  "pm.test('output', () => pm.expect(r.stdout||'').to.include(\"CALC TESTS: 5/5 passed\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/submissions?wait=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_id\": 41,\n  \"source_code\": \"<!DOCTYPE html>\\n<html>\\n<head>\\n  <meta charset=\\\"utf-8\\\">\\n  <style>#display{font-size:24px;padding:12px;border:1px solid #ccc}</style>\\n</head>\\n<body>\\n  <div id=\\\"display\\\">0</div>\\n  <script>\\n    const Calculator = {\\n      add:      (a, b) => a + b,\\n      subtract: (a, b) => a - b,\\n      multiply: (a, b) => a * b,\\n      divide:   (a, b) => (b === 0 ? \\\"Error: divide by zero\\\" : a / b),\\n    };\\n    document.getElementById(\\\"display\\\").textContent = String(Calculator.add(2, 3));\\n    const tests = [\\n      [\\\"add(2,3)\\\",       Calculator.add(2, 3),       5],\\n      [\\\"subtract(10,4)\\\", Calculator.subtract(10, 4), 6],\\n      [\\\"multiply(3,4)\\\",  Calculator.multiply(3, 4),  12],\\n      [\\\"divide(20,5)\\\",   Calculator.divide(20, 5),   4],\\n      [\\\"divide(1,0)\\\",    Calculator.divide(1, 0),    \\\"Error: divide by zero\\\"],\\n    ];\\n    let passed = 0;\\n    for (const [name, got, want] of tests) {\\n      const ok = got === want;\\n      if (ok) passed++;\\n      console.log((ok ? \\\"PASS \\\" : \\\"FAIL \\\") + name + \\\" => \\\" + got);\\n    }\\n    console.log(\\\"CALC TESTS: \\\" + passed + \\\"/\\\" + tests.length + \\\" passed\\\");\\n  </script>\\n</body>\\n</html>\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Web (HTML/CSS/JS) \u2014 QUnit (id=41)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var r = pm.response.json();",
+                  "pm.test('accepted', () => pm.expect((r.status||{}).description).to.eql('Accepted'));",
+                  "pm.test('output', () => pm.expect(r.stdout||'').to.include(\"PASS\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/submissions?wait=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "wait",
+                  "value": "true"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language_id\": 41,\n  \"source_code\": \"<!DOCTYPE html>\\n<html>\\n<head></head>\\n<body>\\n  <script>\\n    function add(a, b) { return a + b; }\\n    function isEven(n) { return n % 2 === 0; }\\n    QUnit.test(\\\"add works\\\", function (t) {\\n      t.equal(add(2, 3), 5, \\\"2+3\\\");\\n      t.equal(add(-1, 1), 0, \\\"-1+1\\\");\\n    });\\n    QUnit.test(\\\"isEven works\\\", function (t) {\\n      t.ok(isEven(4), \\\"4 even\\\");\\n      t.notOk(isEven(3), \\\"3 odd\\\");\\n    });\\n  </script>\\n</body>\\n</html>\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 **A Production-Grade Distributed Code Execution Engine**
 
-> Judge0-inspired, written in Go — execute untrusted code safely across 39 languages using Docker sandboxes, NATS JetStream, PostgreSQL, and Redis.
+> Judge0-inspired, written in Go — execute untrusted code safely across 39 languages using Docker sandboxes, NATS JetStream, MySQL, and Redis.
 
 ---
 
@@ -38,7 +38,7 @@
       └──────────────────────►│   │                    │                       │  │
                               │   │         ┌──────────┼──────────┐            │  │
                               │   │         ▼          ▼          ▼            │  │
-                              │   │    PostgreSQL    Redis    NATS JetStream    │  │
+                              │   │    MySQL         Redis    NATS JetStream    │  │
                               │   │    (persist)   (cache/   (SUBMISSIONS       │  │
                               │   │                pub-sub)   stream)           │  │
                               │   └────────────────────┬───────────────────────┘  │
@@ -50,7 +50,7 @@
                               │              │       │             │               │
                               │              │       ▼             │               │
                               │              │  Fetch Language     │               │
-                              │              │  (PostgreSQL cache) │               │
+                              │              │  (MySQL cache)      │               │
                               │              │       │             │               │
                               │              │   is_database?      │               │
                               │              │    ╱         ╲      │               │
@@ -63,7 +63,7 @@
                               │              │       │             │               │
                               │              │       ▼             │               │
                               │              │  Write Result       │               │
-                              │              │  PostgreSQL +       │               │
+                              │              │  MySQL +            │               │
                               │              │  Redis pub/sub      │               │
                               │              └─────────────────────┘               │
                               └──────────────────────────────────────────────────┘
@@ -78,8 +78,8 @@
 | **Sandbox** | Docker API | Ephemeral, isolated containers for general language execution (CPU, memory, PID limits) |
 | **DBRuntime** | Docker API | Purpose-built runner for database languages (MySQL, PostgreSQL, SQLite, MongoDB) — spins up full DB engine containers |
 | **NATS JetStream** | NATS 2.10 | Durable at-least-once message queue; `SUBMISSIONS` stream with dead-letter consumer |
-| **PostgreSQL** | PG 16 | Source of truth for submissions and language config; GORM AutoMigrate on startup |
-| **Redis** | Redis 7 | Submission result cache (TTL-based) + pub/sub channel for `?wait=true` long-polling |
+| **MySQL** | MySQL 8.0 (AWS RDS) | Source of truth for submissions and language config; GORM AutoMigrate on startup |
+| **Redis** | Redis 7 / AWS ElastiCache | Submission result cache (TTL-based) + pub/sub channel for `?wait=true` long-polling |
 
 ---
 
@@ -138,7 +138,8 @@ The worker detects `is_database = true` on the language row and routes to **DBRu
 ├── cmd/
 │   ├── api-gateway/    # REST API entrypoint (main.go) — built by Makefile + docker/Dockerfile.api
 │   ├── worker/         # Job-executing worker entrypoint — built by Makefile + docker/Dockerfile.worker
-│   └── queue-manager/  # Optional DLQ processor + JetStream bootstrapper — built by Makefile + docker/Dockerfile.queue-manager
+│   ├── queue-manager/  # Optional DLQ processor + JetStream bootstrapper — built by Makefile + docker/Dockerfile.queue-manager
+│   └── migrate/        # Standalone schema-migrate + seed tool (make migrate) — for CI / pre-deploy
 ├── internal/
 │   ├── api/
 │   │   ├── handlers/   # HTTP handler functions (submission, language, health, auth)
@@ -146,7 +147,7 @@ The worker detects `is_database = true` on the language row and routes to **DBRu
 │   │   └── router.go   # Gin route registration
 │   ├── cache/          # Redis client, SubmissionCache (Get/Set/Delete/PollForCompletion)
 │   ├── config/         # Viper-based config loading (env vars + config.yaml)
-│   ├── database/       # PostgreSQL client (GORM), AutoMigrate, SubmissionRepository
+│   ├── database/       # MySQL client (GORM), AutoMigrate, SubmissionRepository
 │   ├── metrics/        # Prometheus counter/histogram/gauge definitions (APIMetrics, WorkerMetrics)
 │   ├── models/         # Domain types: Language, Submission, ExecutionJob, status constants
 │   │                   # DefaultLanguages() + SeedLanguages() (39 languages)
@@ -172,7 +173,7 @@ The worker detects `is_database = true` on the language row and routes to **DBRu
 │   ├── rust/           # → code-runtime-rust:latest
 │   └── swift/          # → code-runtime-swift:latest
 ├── scripts/
-│   ├── init.sql        # PostgreSQL init: extensions + grants (runs once on container creation)
+│   ├── init.sql        # MySQL init: create DB + grants (runs once on container creation)
 │   ├── migrate.sh      # Applies supplementary SQL migrations from scripts/migrations/
 │   ├── pull-images.sh  # Builds all code-runtime-* images; pulls official language images
 │   ├── seed.sh         # Verifies language seeding (API auto-seeds on startup)
@@ -183,7 +184,7 @@ The worker detects `is_database = true` on the language row and routes to **DBRu
 │   ├── kubernetes/     # Raw K8s manifests
 │   └── monitoring/     # Prometheus scrape configs + Grafana dashboard JSON
 ├── config/             # config.yaml defaults
-├── docker-compose.yml  # Full local stack (api, worker, postgres, redis, nats, prometheus, grafana, jaeger)
+├── docker-compose.yml  # Full local stack (api, worker, mysql, redis, nats, prometheus, grafana, jaeger)
 ├── Makefile
 └── go.mod
 ```
@@ -224,7 +225,7 @@ The worker detects `is_database = true` on the language row and routes to **DBRu
 
 ```bash
 # 1. Clone
-git clone https://github.com/mdshabbir-ali/code-runtime.git
+git clone https://github.com/Revature/corems-code-executor.git
 cd code-runtime
 
 # 2. Full setup (builds images, starts services, verifies health)
@@ -279,8 +280,69 @@ All `/submissions` and `/auth/apikey` endpoints require `Authorization: Bearer <
 | `POST` | `/submissions` | Bearer | `wait=true\|false` | Create a single submission |
 | `GET` | `/submissions` | Bearer | `page`, `per_page` | List paginated submissions |
 | `GET` | `/submissions/:token` | Bearer | — | Get submission by UUID token |
+| `GET` | `/submissions/batch/:tokens` | Bearer | — | Get up to 20 submissions by comma-separated tokens |
 | `DELETE` | `/submissions/:token` | Bearer | — | Delete a submission |
-| `POST` | `/submissions/batch` | Bearer | — | Create up to 20 submissions |
+| `POST` | `/submissions/batch` | Bearer | — | Create up to 20 submissions (returns tokens only) |
+
+### Batches & Webhooks
+
+A **batch** groups up to 20 submissions under a single `batch_id`. **Creation
+and execution are decoupled**: `POST /batches` only *persists* the batch +
+submissions (atomically, status `pending`) and returns the `batch_id` + tokens —
+**it does not start execution**. Execution begins only when the batch is
+*started*, either by `POST /batches/:id/start` or by publishing a
+`START_BATCH_PROCESSING {batch_id}` event to the SQS start queue. This lets a
+caller (e.g. an Assessment Service) commit its own token mappings *before* any
+result webhook can fire — eliminating the create-vs-persist race. Once a started
+batch completes, the linked **webhook** receives the full result (`X-API-Key`
+header carries the webhook's outbound key).
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/webhooks` | Bearer | Register a webhook; `api_key` generated if omitted (returned once) |
+| `GET` | `/webhooks` | Bearer | List webhooks owned by the caller |
+| `GET` | `/webhooks/:id` | Bearer | Get a webhook by id |
+| `POST` | `/batches` | Bearer | **Persist** a batch (PENDING) + return `batch_id`/tokens. No execution. |
+| `POST` | `/batches/:id/start` | Bearer | **Start** execution (idempotent). Equivalent to a `START_BATCH_PROCESSING` event. |
+| `GET` | `/batches/:id` | Bearer | Get batch progress and every submission's result |
+| `POST` | `/batches/:id/callback` | Bearer | Re-deliver the batch result to the linked webhook |
+
+**Typical flow**
+
+```bash
+# 1. Register a webhook (store the returned api_key shown once)
+curl -s -X POST http://localhost:8002/webhooks \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"results-sink","url":"https://example.com/hook"}'
+# → { "id": "<webhook_id>", "api_key": "<shown once>", ... }
+
+# 2. Create (persist only) a batch linked to that webhook — stays PENDING
+curl -s -X POST http://localhost:8002/batches \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"webhook_id":"<webhook_id>","submissions":[
+        {"language_id":29,"source_code":"cHJpbnQoMSk="},
+        {"language_id":29,"source_code":"cHJpbnQoMik="}]}'
+# → { "batch_id": "<batch_id>", "tokens": [...], "total": 2, "status": "pending" }
+
+# 3. AFTER you've persisted your own token mappings, start execution:
+#    a) directly …
+curl -s -X POST http://localhost:8002/batches/<batch_id>/start \
+  -H "Authorization: Bearer $TOKEN"
+#    b) … or publish START_BATCH_PROCESSING to the SQS start queue:
+#    aws sqs send-message --queue-url $SQS_START_QUEUE_URL \
+#      --message-body '{"batch_id":"<batch_id>"}'
+
+# 4. Poll progress (or wait for the webhook delivery)
+curl -s http://localhost:8002/batches/<batch_id> -H "Authorization: Bearer $TOKEN"
+
+# 5. Re-fire the webhook on demand
+curl -s -X POST http://localhost:8002/batches/<batch_id>/callback \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+When the batch completes, the receiver gets a POST with the `BatchResponse`
+body (batch progress + all submission results) and the `X-API-Key` header set
+to the webhook's stored key.
 
 ### Languages & Statuses
 
@@ -294,7 +356,7 @@ All `/submissions` and `/auth/apikey` endpoints require `Authorization: Bearer <
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/health` | None | Liveness: checks PostgreSQL, Redis, NATS connectivity |
+| `GET` | `/health` | None | Liveness: checks MySQL, Redis, NATS connectivity |
 | `GET` | `/readyz` | None | Readiness: returns 200 only when fully initialised |
 | `GET` | `/metrics` | None | Prometheus metrics |
 
@@ -432,12 +494,12 @@ Configuration is loaded by Viper: `config/config.yaml` → environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_HOST` | `localhost` | PostgreSQL host |
-| `DATABASE_PORT` | `5432` | PostgreSQL port |
+| `DATABASE_HOST` | `localhost` | MySQL host (AWS RDS endpoint in prod) |
+| `DATABASE_PORT` | `3306` | MySQL port |
 | `DATABASE_USER` | `coderuntime` | Database user |
 | `DATABASE_PASSWORD` | `coderuntime123` | Database password |
 | `DATABASE_NAME` | `coderuntime` | Database name |
-| `DATABASE_SSL_MODE` | `disable` | `disable`, `require`, `verify-full` |
+| `DATABASE_SSL_MODE` | `disable` | MySQL TLS (go-sql-driver `tls`): `disable`, `true`, `skip-verify`, `preferred` (use `true` for RDS) |
 | `DATABASE_MAX_OPEN_CONNS` | `25` | Connection pool size |
 | `DATABASE_MAX_IDLE_CONNS` | `10` | Idle connections kept open |
 | `DATABASE_CONN_MAX_LIFETIME` | `30m` | Maximum connection lifetime |
@@ -446,11 +508,12 @@ Configuration is loaded by Viper: `config/config.yaml` → environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REDIS_HOST` | `localhost` | Redis host |
+| `REDIS_HOST` | `localhost` | Redis host (AWS ElastiCache endpoint in prod) |
 | `REDIS_PORT` | `6379` | Redis port |
-| `REDIS_PASSWORD` | _(empty)_ | Redis auth password |
+| `REDIS_PASSWORD` | _(empty)_ | Redis auth password (leave empty for ElastiCache with no AUTH token) |
 | `REDIS_DB` | `0` | Redis database index |
 | `REDIS_POOL_SIZE` | `20` | Connection pool size |
+| `REDIS_TLS_ENABLED` | `false` | Enable in-transit TLS — **required** for ElastiCache Serverless (Valkey/Redis) |
 
 ### NATS JetStream
 
@@ -461,6 +524,27 @@ Configuration is loaded by Viper: `config/config.yaml` → environment variables
 | `NATS_WORKER_SUBJECT` | `worker.execute` | Subject workers consume |
 | `NATS_MAX_RECONNECTS` | `-1` | Maximum reconnection attempts (-1 = unlimited) |
 | `NATS_RECONNECT_WAIT` | `2s` | Delay between reconnection attempts |
+
+### Job queue backend
+
+The queue is pluggable: NATS JetStream (default, local dev) or Amazon SQS (AWS).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `QUEUE_PROVIDER` | `nats` | `nats` or `sqs` |
+| `SQS_REGION` | `us-east-1` | AWS region (sqs provider) |
+| `SQS_JOBS_QUEUE_URL` | _(empty)_ | Per-submission execution-job queue URL |
+| `SQS_PRIORITY_QUEUE_URL` | _(empty)_ | High-priority job queue URL |
+| `SQS_START_QUEUE_URL` | _(empty)_ | `START_BATCH_PROCESSING` event queue (triggers batch execution) |
+| `SQS_DLQ_QUEUE_URL` | _(empty)_ | Dead-letter queue URL (redrive target) |
+| `SQS_WAIT_TIME_SECONDS` | `20` | Long-poll wait (0–20) |
+| `SQS_VISIBILITY_TIMEOUT` | `330` | Seconds; must exceed max job execution time |
+| `SQS_MAX_CONCURRENCY` | `8` | In-flight messages per worker |
+
+With `QUEUE_PROVIDER=sqs`: jobs carry only the submission token (the worker
+re-reads the full job from MySQL, dodging the 256 KB SQS message limit); the
+priority queue is polled before the normal queue; retries/DLQ are handled by the
+SQS redrive policy. AWS credentials come from the instance/task IAM role.
 
 ### Worker
 
@@ -484,6 +568,71 @@ max concurrent jobs cluster-wide = WORKER_COUNT × WORKER_CONCURRENCY × <worker
 For the dev compose defaults (`COUNT=4`, `CONCURRENCY=4`, `replicas: 2`)
 that's **32 concurrent sandbox executions**. See
 [Capacity planning](#capacity-planning) for prod-scale tuning.
+
+### Webhooks (batch-completion delivery + retry)
+
+When a batch finishes, the worker delivers the result to the linked webhook and
+retries on failure with exponential backoff. Failed-after-retries deliveries are
+recorded (`webhook_status=failed`) and can be re-fired via `POST /batches/:id/callback`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WEBHOOK_MAX_RETRIES` | `3` | Extra delivery attempts after the first |
+| `WEBHOOK_RETRY_DELAY` | `10s` | Wait before the first retry |
+| `WEBHOOK_RETRY_BACKOFF` | `2.0` | Delay multiplier per retry (`1.0` = fixed delay) |
+| `WEBHOOK_RETRY_MAX_DELAY` | `5m` | Cap on the retry delay |
+| `WEBHOOK_TIMEOUT` | `10s` | Per-attempt HTTP timeout |
+
+Delivery runs asynchronously on a detached context so retries don't hold a
+worker slot. The manual callback endpoint does a single immediate attempt.
+
+### Rate limiting
+
+The API enforces a sliding-window rate limit (HTTP `429 Too Many Requests` when
+exceeded), backed by Redis so every api-gateway replica shares one global
+budget. The limit is applied **per caller identity** — the API key ID when the
+request is authenticated with one (`rl:<class>:apikey:<id>`), otherwise the
+client IP (`rl:<class>:ip:<addr>`).
+
+**Per-route-class budgets.** Endpoints are split into three independent buckets
+so that heavy polling reads can never exhaust the budget needed for expensive
+writes (and vice versa):
+
+| Class | Routes | Why a separate budget |
+|-------|--------|-----------------------|
+| **read** | All `GET` (e.g. `GET /submissions/:token`, `GET /batches/:id`, language/status lookups) | Clients poll results frequently; reads are cheap, so this budget is generous. |
+| **write** | `POST`/`DELETE` (e.g. `POST /submissions`, `POST /batches`, `POST /batches/:id/start`) | Submissions consume sandbox capacity; this budget is moderate. |
+| **auth** | `/auth/*` (token + API-key issuance) | Pre-authentication; kept tight to deter credential brute-force. |
+
+A response carries `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
+`X-RateLimit-Reset` (unix seconds); a `429` also includes `Retry-After`
+(seconds) and a JSON body `{ "error": "rate limit exceeded", "retry_after": N }`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RATE_LIMIT_ENABLED` | `true` | Master switch. When `false`, all classes are pass-through. |
+| `RATE_LIMIT_LIMIT` | `100` | Default bucket size, used as the fallback when a class-specific limit is `0`/unset. |
+| `RATE_LIMIT_PERIOD` | `1m` | Window for the default bucket. |
+| `RATE_LIMIT_READ_LIMIT` | `1200` | Max **read** (`GET`) requests per caller per `READ_PERIOD`. |
+| `RATE_LIMIT_READ_PERIOD` | `1m` | Window for the read bucket. |
+| `RATE_LIMIT_WRITE_LIMIT` | `300` | Max **write** (`POST`/`DELETE`) requests per caller per `WRITE_PERIOD`. |
+| `RATE_LIMIT_WRITE_PERIOD` | `1m` | Window for the write bucket. |
+| `RATE_LIMIT_AUTH_LIMIT` | `30` | Max **auth** requests per caller per `AUTH_PERIOD`. |
+| `RATE_LIMIT_AUTH_PERIOD` | `1m` | Window for the auth bucket. |
+| `RATE_LIMIT_TRUSTED_API_KEYS` | _(empty)_ | Comma-separated API key **IDs** that bypass all limits entirely — for internal, server-to-server callers (e.g. the Assessment Service). Trust applies only to authenticated routes, never to `/auth`. |
+| `RATE_LIMIT_STORE_TYPE` | `redis` | Backing store: `redis` (shared across replicas) or `memory`. |
+| `SERVER_TRUSTED_PROXIES` | _(empty)_ | CIDR(s) of your load balancer / ingress. **Required behind a proxy** so the real client IP is read from `X-Forwarded-For`; otherwise every request appears to come from the proxy's IP and all unauthenticated clients collapse into a single bucket. |
+
+> **Tuning notes**
+> - Each class limit falls back to `RATE_LIMIT_LIMIT`/`RATE_LIMIT_PERIOD` when left at `0`.
+> - On a Redis error the middleware **fails open** (allows the request) rather than blocking traffic.
+> - Prefer the **webhook callback** over tight polling to keep read traffic low.
+> - Clients should honour `Retry-After` with exponential backoff.
+
+**Troubleshooting `429`s:**
+1. If an **internal service** is being throttled, add its API key ID to `RATE_LIMIT_TRUSTED_API_KEYS`.
+2. If **all public users** share one bucket, set `SERVER_TRUSTED_PROXIES` to your LB/ingress CIDR.
+3. If a legitimate workload is genuinely high-volume, raise the relevant class limit (`READ`/`WRITE`).
 
 ### Docker
 
@@ -627,11 +776,12 @@ worker node and pin one worker pod per node.
 Workers are rarely the first thing to break. The real ceilings at scale are
 elsewhere — keep these in sync:
 
-1. **Postgres `max_connections`.** Each api pod opens up to
+1. **MySQL `max_connections`.** Each api pod opens up to
    `database.max_open_conns` (default 25). At 20 api pods that's 500 — the
-   default server cap is 200. Add [PgBouncer](https://www.pgbouncer.org)
-   (transaction pooling) in front of Postgres above ~5 api pods, or you'll
-   see `too many connections` long before you hit your worker ceiling.
+   compose default cap is 200. Use [RDS Proxy](https://aws.amazon.com/rds/proxy/)
+   (or ProxySQL) for connection pooling above ~5 api pods, or raise the RDS
+   `max_connections` parameter, otherwise you'll see `too many connections`
+   long before you hit your worker ceiling.
 
 2. **Docker daemon throughput per node.** A single Docker daemon
    comfortably starts ~50 containers/sec, but spinning up 100+ simultaneously
@@ -681,7 +831,7 @@ helm upgrade coderuntime ./deployments/helm \
   --set worker.autoscaling.minReplicas=8 \
   --set worker.autoscaling.maxReplicas=100 \
   --set api.autoscaling.maxReplicas=50 \
-  --set postgresql.architecture=replication \
+  --set mysql.architecture=replication \
   --set redis.architecture=cluster
 ```
 
@@ -689,7 +839,7 @@ Before bumping these in prod, run `make load-test` and watch:
 
 - worker pod CPU/memory utilization (HPA target is 75% CPU)
 - NATS pending message count per stream
-- Postgres `pg_stat_activity` total connections
+- MySQL `Threads_connected` / `SHOW PROCESSLIST` total connections
 - API p99 latency, worker job duration p99
 
 ---
@@ -725,14 +875,29 @@ python3 scripts/test_languages.py 9 22 35
 
 ### Adding a migration
 
-Create paired files under `scripts/migrations/`:
+The schema is **GORM-managed** — there are no hand-written SQL migration files.
+To change the schema:
 
-```
-scripts/migrations/001_add_submission_index_up.sql
-scripts/migrations/001_add_submission_index_down.sql
+1. Edit the model struct in [internal/models/](internal/models/) (add/alter
+   fields with `gorm:"..."` tags). `AutoMigrate` adds new columns/tables on the
+   next startup.
+2. For indexes or constraints GORM can't express declaratively, add an entry to
+   the `indexes` list / `ensureIndex` helper in
+   [internal/database/migrations.go](internal/database/migrations.go) (MySQL has
+   no partial indexes or `CREATE INDEX IF NOT EXISTS` — see the helper).
+
+Migrations + reference-data seeding run automatically on api-gateway startup
+(`migrate_on_start=true`). To apply them standalone (e.g. against AWS RDS before
+a rollout):
+
+```bash
+make migrate          # schema + seed (idempotent)
+make migrate-schema   # schema only
+make seed             # statuses & languages only
 ```
 
-Run with `bash scripts/migrate.sh` (or `--dry-run` to preview).
+> Note: `scripts/migrate.sh` / `scripts/seed.sh` are legacy PostgreSQL `psql`
+> tooling, kept for reference only — not used by the MySQL-based flow above.
 
 ---
 

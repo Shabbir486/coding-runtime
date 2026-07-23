@@ -1,0 +1,239 @@
+---
+# Queue-manager: connects to NATS and idempotently creates every required
+# JetStream stream (api-gateway and worker intentionally never create streams).
+# Exposes /health and /metrics on :8083 and polls stream depth for the worker
+# HPA's `nats_queue_size` custom metric. CreateStreams is idempotent, so running
+# >1 replica is safe (each just re-asserts the same topology).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-manager
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: queue-manager
+    app.kubernetes.io/component: queue
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 1  # LOCAL: single replica on a 1-node kind cluster
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: queue-manager
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: queue-manager
+        app.kubernetes.io/component: queue
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8083"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: api-gateway
+      automountServiceAccountToken: false
+      priorityClassName: api-priority
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: queue-manager
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: queue-manager
+                topologyKey: kubernetes.io/hostname
+
+      terminationGracePeriodSeconds: 30
+
+      # No imagePullSecrets: EKS nodes pull from ECR via their IAM role.
+
+      containers:
+        - name: queue-manager
+          image: ghcr.io/coderuntime/queue-manager:latest
+          imagePullPolicy: IfNotPresent  # LOCAL: use the image loaded into kind
+          ports:
+            - name: http
+              containerPort: 8083
+              protocol: TCP
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          envFrom:
+            - configMapRef:
+                name: common-config
+            - configMapRef:
+                name: queue-manager-config
+            # LOCAL: AWS keys for the SQS DLQ drainer (no IRSA on kind).
+            - secretRef:
+                name: aws-credentials
+          env:
+            # queue-manager talks to MySQL only in SQS mode (DLQ drainer); in
+            # NATS mode the DB envs are harmless. Kept for parity with the others.
+            - name: CODERUNTIME_DATABASE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: DATABASE_HOST
+            - name: CODERUNTIME_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: DATABASE_USER
+            - name: CODERUNTIME_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: DATABASE_PASSWORD
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # SQS credentials: on EKS these come from IRSA (the queue-manager
+            # ServiceAccount is annotated with an IAM role; the AWS SDK reads the
+            # OIDC web-identity token automatically — no static keys). For a
+            # non-EKS/local target, inject AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+            # here from an aws-credentials Secret instead.
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 20
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: queue-manager
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: queue-manager
+    app.kubernetes.io/component: queue
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8083"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: queue-manager
+  ports:
+    - name: http
+      port: 8083
+      targetPort: http
+      protocol: TCP
+
+---
+# queue-manager is lightweight (stream bookkeeping + depth polling), so it
+# autoscales modestly on CPU only — it is not on the hot request/execution path.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: queue-manager
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: queue-manager
+    app.kubernetes.io/component: queue
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: queue-manager
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: queue-manager-pdb
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: queue-manager
+    app.kubernetes.io/component: queue
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: queue-manager

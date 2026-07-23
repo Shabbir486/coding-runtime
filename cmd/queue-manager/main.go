@@ -22,10 +22,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/config"
-	"github.com/mdshabbir-ali/code-runtime/internal/database"
-	"github.com/mdshabbir-ali/code-runtime/internal/metrics"
-	"github.com/mdshabbir-ali/code-runtime/internal/queue"
+	"github.com/revature/corems-code-executor/internal/config"
+	"github.com/revature/corems-code-executor/internal/database"
+	"github.com/revature/corems-code-executor/internal/metrics"
+	"github.com/revature/corems-code-executor/internal/models"
+	"github.com/revature/corems-code-executor/internal/queue"
+	qsqs "github.com/revature/corems-code-executor/internal/queue/sqs"
+	"github.com/revature/corems-code-executor/internal/webhook"
 )
 
 func main() {
@@ -47,6 +50,11 @@ func run(logger *zap.Logger) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// SQS provider: no NATS streams to own; run the SQS DLQ drainer instead.
+	if cfg.QueueProvider == queue.ProviderSQS {
+		return runSQS(cfg, logger)
 	}
 
 	natsClient, err := connectNATS(cfg, logger)
@@ -82,6 +90,197 @@ func run(logger *zap.Logger) error {
 	return nil
 }
 
+// runSQS is the SQS-mode entry point: it drains the SQS dead-letter queue
+// (marking failed submissions in the DB) and publishes queue-depth metrics.
+// There is no NATS topology to own in this mode.
+func runSQS(cfg *config.Config, logger *zap.Logger) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	subRepo, _ := connectDB(cfg, logger)
+
+	client, err := qsqs.NewClient(ctx, cfg.SQS)
+	if err != nil {
+		return fmt.Errorf("sqs client: %w", err)
+	}
+
+	recorder := func(ctx context.Context, token, _ string) error {
+		if subRepo == nil {
+			return nil
+		}
+		return subRepo.UpdateStatus(ctx, token, models.StatusInternalError)
+	}
+
+	globalMetrics := metrics.New(cfg.Metrics.Namespace)
+	httpServer := buildSQSHTTPServer()
+	httpErrCh := startHTTPServer(httpServer, logger)
+
+	go pollSQSDepth(ctx, client, cfg, globalMetrics, logger)
+
+	// Durable safety net: re-deliver batch webhooks that were lost when a worker
+	// restarted mid-dispatch (they stay status=completed but webhook=pending).
+	startWebhookReconciler(ctx, cfg, logger)
+
+	drainer := qsqs.NewDLQDrainer(client, cfg.SQS, recorder, logger)
+	drainErrCh := make(chan error, 1)
+	go func() {
+		err := drainer.Start(ctx)
+		if errors.Is(err, context.Canceled) {
+			err = nil
+		}
+		drainErrCh <- err
+	}()
+
+	logger.Info("queue-manager running in SQS mode", zap.String("dlq", cfg.SQS.DLQQueueURL))
+
+	select {
+	case <-ctx.Done():
+		logger.Info("shutdown signal received")
+	case err := <-drainErrCh:
+		if err != nil {
+			logger.Error("dlq drainer fatal error", zap.Error(err))
+		}
+	case err := <-httpErrCh:
+		if err != nil {
+			logger.Error("http server fatal error", zap.Error(err))
+		}
+	}
+
+	cancel()
+	shutCtx, sc := context.WithTimeout(context.Background(), 15*time.Second)
+	defer sc()
+	_ = httpServer.Shutdown(shutCtx)
+	logger.Info("queue-manager (sqs) shutdown complete")
+	return nil
+}
+
+// startWebhookReconciler launches a background loop that re-delivers batch
+// webhooks stranded at pending/failed — the durable complement to the worker's
+// best-effort immediate dispatch (which is lost if the worker pod restarts
+// mid-delivery). It re-uses the same Dispatcher/retry config as the worker.
+func startWebhookReconciler(ctx context.Context, cfg *config.Config, logger *zap.Logger) {
+	db, err := database.Connect(cfg, logger)
+	if err != nil {
+		logger.Warn("webhook reconciler disabled — database unavailable", zap.Error(err))
+		return
+	}
+	batchRepo := database.NewBatchRepository(db)
+	webhookRepo := database.NewWebhookRepository(db)
+	dispatcher := webhook.NewDispatcher(batchRepo, webhookRepo, nil, webhook.RetryConfig{
+		MaxRetries: cfg.Webhook.MaxRetries,
+		Delay:      cfg.Webhook.RetryDelay,
+		Backoff:    cfg.Webhook.RetryBackoff,
+		MaxDelay:   cfg.Webhook.RetryMaxDelay,
+		Timeout:    cfg.Webhook.Timeout,
+	}, logger)
+
+	// Per-batch attempt timeout: the HTTP timeout plus a margin.
+	perBatch := cfg.Webhook.Timeout + 15*time.Second
+	if perBatch <= 0 {
+		perBatch = 135 * time.Second
+	}
+
+	go func() {
+		ticker := time.NewTicker(reconcileInterval)
+		defer ticker.Stop()
+		logger.Info("webhook reconciler started",
+			zap.Duration("interval", reconcileInterval), zap.Duration("grace", reconcileGrace))
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				reconcileWebhooksOnce(ctx, batchRepo, dispatcher, perBatch, logger)
+			}
+		}
+	}()
+}
+
+// Reconciler tunables.
+const (
+	reconcileInterval = 60 * time.Second // how often to sweep
+	reconcileGrace    = 2 * time.Minute  // skip batches completed within this window (let immediate dispatch win)
+	reconcileMaxAge   = 24 * time.Hour   // stop retrying batches older than this
+	reconcileLimit    = 25               // batches per sweep
+)
+
+// reconcileWebhooksOnce performs one reconciliation sweep: find stuck batches
+// and re-deliver each with a single bounded attempt (the ticker is the retry).
+func reconcileWebhooksOnce(
+	ctx context.Context,
+	batches database.BatchRepository,
+	dispatcher *webhook.Dispatcher,
+	perBatch time.Duration,
+	logger *zap.Logger,
+) {
+	stuck, err := batches.ListReconcilableBatches(ctx, reconcileGrace, reconcileMaxAge, reconcileLimit)
+	if err != nil {
+		logger.Warn("webhook reconciler: list failed", zap.Error(err))
+		return
+	}
+	if len(stuck) == 0 {
+		return
+	}
+	logger.Info("webhook reconciler: re-delivering stuck batches", zap.Int("count", len(stuck)))
+	for _, b := range stuck {
+		attemptCtx, cancel := context.WithTimeout(ctx, perBatch)
+		err := dispatcher.DispatchBatch(attemptCtx, b.ID)
+		cancel()
+		if err != nil {
+			logger.Warn("webhook reconciler: re-delivery failed",
+				zap.String("batch_id", b.ID), zap.Error(err))
+		} else {
+			logger.Info("webhook reconciler: re-delivered", zap.String("batch_id", b.ID))
+		}
+	}
+}
+
+// buildSQSHTTPServer serves /metrics and a simple /health for SQS mode.
+func buildSQSHTTPServer() *http.Server {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","provider":"sqs"}`))
+	})
+	return &http.Server{
+		Addr:         fmt.Sprintf(":%s", envOrDefault("QUEUE_MANAGER_PORT", "8083")),
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+}
+
+// pollSQSDepth periodically records the approximate depth of the SQS queues.
+func pollSQSDepth(ctx context.Context, api qsqs.API, cfg *config.Config, m *metrics.Metrics, logger *zap.Logger) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	queues := map[string]string{
+		"submissions":          cfg.SQS.JobsQueueURL,
+		"submissions_priority": cfg.SQS.PriorityQueueURL,
+		"submissions_dlq":      cfg.SQS.DLQQueueURL,
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for label, url := range queues {
+				if url == "" {
+					continue
+				}
+				if n, err := qsqs.ApproxMessages(ctx, api, url); err == nil {
+					m.QueueDepth.WithLabelValues(label).Set(float64(n))
+				} else {
+					logger.Debug("sqs depth poll failed", zap.String("queue", label), zap.Error(err))
+				}
+			}
+		}
+	}
+}
+
 // connectNATS dials NATS with settings derived from cfg.
 func connectNATS(cfg *config.Config, logger *zap.Logger) (*queue.Client, error) {
 	reconnectWait := cfg.NATS.ReconnectWait
@@ -111,7 +310,7 @@ func closeNATS(client *queue.Client, logger *zap.Logger) {
 	}
 }
 
-// connectDB opens PostgreSQL and returns repository instances.
+// connectDB opens MySQL and returns repository instances.
 // On failure it logs a warning and returns nil repositories so the DLQ handler
 // can still run in log-only mode.
 func connectDB(cfg *config.Config, logger *zap.Logger) (database.SubmissionRepository, database.ExecutionLogRepository) {
@@ -125,7 +324,7 @@ func connectDB(cfg *config.Config, logger *zap.Logger) (database.SubmissionRepos
 
 // buildHTTPServer constructs the HTTP server with /health and /metrics routes.
 func buildHTTPServer(cfg *config.Config, natsClient *queue.Client, logger *zap.Logger) *http.Server {
-	addr := fmt.Sprintf(":%s", envOrDefault("QUEUE_MANAGER_PORT", "8081"))
+	addr := fmt.Sprintf(":%s", envOrDefault("QUEUE_MANAGER_PORT", "8083"))
 	_ = cfg // reserved for future per-config tuning (TLS, timeouts override, etc.)
 
 	mux := http.NewServeMux()

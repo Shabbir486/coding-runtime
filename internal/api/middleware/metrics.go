@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/mdshabbir-ali/code-runtime/internal/metrics"
+	"github.com/revature/corems-code-executor/internal/metrics"
 )
 
 // Metrics records HTTP request metrics.

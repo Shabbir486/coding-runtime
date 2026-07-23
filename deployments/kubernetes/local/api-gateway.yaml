@@ -1,0 +1,345 @@
+---
+# Application config lives in deployments/kubernetes/configmap.yaml as
+# "api-config". The previous inline "api-app-config" duplicate has been removed
+# to keep one source of truth.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/component: api
+    app.kubernetes.io/version: "1.0.0"
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+spec:
+  # LOCAL: single replica on a 1-node kind cluster (HPA min lowered to 1 below).
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api-gateway
+        app.kubernetes.io/component: api
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8002"
+        prometheus.io/path: "/metrics"
+        # Force pod restart on configmap change
+        checksum/config: "{{ sha256sum .Values.config }}"
+    spec:
+      serviceAccountName: api-gateway
+      automountServiceAccountToken: false
+      priorityClassName: api-priority
+
+      # Pod-level security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Spread across nodes/zones — LOCAL: ScheduleAnyway (not DoNotSchedule) so a
+      # rolling restart's surge pod can co-locate on the single kind node. On EKS
+      # this is DoNotSchedule for true multi-node spread.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: api-gateway
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: api-gateway
+
+      # LOCAL: preferred (not required) anti-affinity — a single kind node can't
+      # satisfy "no two api pods per node" during a rollout. Required on EKS.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: api-gateway
+                topologyKey: kubernetes.io/hostname
+
+      terminationGracePeriodSeconds: 60
+
+      # No imagePullSecrets: EKS nodes pull from ECR via their IAM role; for a
+      # private GHCR/registry, add `imagePullSecrets: [{name: registry-credentials}]`
+      # and create that secret.
+
+      containers:
+        - name: api-gateway
+          image: ghcr.io/coderuntime/api-gateway:latest
+          imagePullPolicy: IfNotPresent  # LOCAL: use the image loaded into kind
+          ports:
+            - name: http
+              containerPort: 8002
+              protocol: TCP
+
+          # Container-level security context
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          envFrom:
+            - configMapRef:
+                name: common-config
+            - configMapRef:
+                name: api-config
+            # LOCAL: AWS keys so the api can publish jobs to SQS (no IRSA on kind).
+            - secretRef:
+                name: aws-credentials
+          # Env var NAMES are prefixed with CODERUNTIME_ so Viper (with
+          # SetEnvPrefix("CODERUNTIME")) actually reads them. The secret data
+          # KEYS themselves stay short — only the env var name in the pod
+          # matters to the binary.
+          env:
+            - name: CODERUNTIME_DATABASE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: DATABASE_HOST
+            - name: CODERUNTIME_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: DATABASE_USER
+            - name: CODERUNTIME_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: DATABASE_PASSWORD
+            - name: CODERUNTIME_REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: REDIS_HOST
+            - name: CODERUNTIME_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: REDIS_PASSWORD
+            - name: CODERUNTIME_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: api-secrets
+                  key: JWT_SECRET
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            # SQS credentials: on EKS these come from IRSA (the api-gateway
+            # ServiceAccount is annotated with an IAM role; the AWS SDK reads the
+            # OIDC web-identity token automatically — no static keys). For a
+            # non-EKS/local target, inject AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+            # here from an aws-credentials Secret instead.
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 15
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/component: api
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8002"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: api-gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 1
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    # NOTE: the api is genuinely CPU-bound (unlike the worker), so CPU+memory
+    # are valid scaling signals here. A request-rate metric (http_requests_total)
+    # can be added via Prometheus Adapter; the previous `http_requests_per_second`
+    # metric was removed because the code exposes no such series (only
+    # http_requests_total / http_requests_in_flight), so it never resolved.
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 3
+          periodSeconds: 60
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-gateway
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/component: api
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://app.coderuntime.io"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+    - hosts:
+        - api.coderuntime.io
+      secretName: coderuntime-tls
+  rules:
+    - host: api.coderuntime.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  name: http
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-gateway-pdb
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: api-gateway
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api-gateway

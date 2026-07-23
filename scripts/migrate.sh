@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# NOTE: Legacy psql-based tooling. The canonical schema migration and
+# reference-data seeding now run automatically via GORM AutoMigrate +
+# SeedStatuses/SeedLanguages at service startup (database.MigrateAndSeed).
+# This script targets PostgreSQL and is NOT MySQL-compatible; kept for
+# historical reference only.
 # =============================================================================
 # CodeRuntime — Database Migration Script
 # =============================================================================

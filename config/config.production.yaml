@@ -15,12 +15,12 @@ server:
 
 database:
   host: "${DB_HOST}"
-  port: 5432
+  port: 3306
   user: "${DB_USER}"
   password: "${DB_PASSWORD}"
-  dbname: "${DB_NAME}"
-  # Require TLS in production — never disable
-  sslmode: "require"
+  name: "${DB_NAME}"
+  # Require TLS in production (AWS RDS). Use "skip-verify" only without the RDS CA bundle.
+  ssl_mode: "true"
   max_open_conns: 50
   max_idle_conns: 20
   conn_max_lifetime: 600s
@@ -28,16 +28,41 @@ database:
 redis:
   host: "${REDIS_HOST}"
   port: 6379
+  # AWS ElastiCache Serverless needs no AUTH token; leave empty.
   password: "${REDIS_PASSWORD}"
   db: 0
   # Larger pool to handle production traffic spikes
   pool_size: 50
+  # ElastiCache Serverless (Valkey/Redis) requires in-transit TLS.
+  tls_enabled: true
 
 nats:
   url: "${NATS_URL}"
   subject: "submissions"
   max_reconnects: 20
   reconnect_wait: 5s
+
+# Batch-completion webhook delivery + retry.
+webhook:
+  max_retries: 5
+  retry_delay: 15s
+  retry_backoff: 2.0
+  retry_max_delay: 10m
+  timeout: 10s
+
+# Job-queue backend. Set to "sqs" to use Amazon SQS in production.
+queue_provider: "${QUEUE_PROVIDER}"
+
+# Amazon SQS (used when queue_provider=sqs). Credentials via IAM task/instance role.
+sqs:
+  region: "${AWS_REGION}"
+  jobs_queue_url: "${SQS_JOBS_QUEUE_URL}"
+  priority_queue_url: "${SQS_PRIORITY_QUEUE_URL}"
+  start_queue_url: "${SQS_START_QUEUE_URL}"
+  dlq_queue_url: "${SQS_DLQ_QUEUE_URL}"
+  wait_time_seconds: 20
+  visibility_timeout: 330
+  max_concurrency: 16
 
 auth:
   # Must be overridden via APP_AUTH_JWT_SECRET env var — minimum 32 chars
@@ -74,8 +99,10 @@ tracing:
 cors:
   # Lock down CORS to known frontends in production
   allow_origins:
-    - "https://app.coderuntime.io"
-    - "https://dashboard.coderuntime.io"
+    - "http://localhost:4200"
+    - "http://localhost:80"
+    - "https://qa.revature.com"
+    - "https://qa-ms.revature.com"
   allow_methods:
     - "GET"
     - "POST"

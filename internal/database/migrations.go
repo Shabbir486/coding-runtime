@@ -6,8 +6,37 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
 
-	"github.com/mdshabbir-ali/code-runtime/internal/models"
+	"github.com/revature/corems-code-executor/internal/models"
 )
+
+// indexSpec describes a secondary index to create if it does not already exist.
+type indexSpec struct {
+	table   string
+	name    string
+	columns string // comma-separated column list, e.g. "status_id, created_at"
+}
+
+// ensureIndex creates the index only when it is absent. MySQL lacks
+// `CREATE INDEX IF NOT EXISTS`, so existence is checked via information_schema
+// against the current schema (DATABASE()).
+func ensureIndex(db *DB, idx indexSpec) error {
+	var count int64
+	if err := db.DB.Raw(
+		`SELECT COUNT(1) FROM information_schema.statistics
+		 WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?`,
+		idx.table, idx.name,
+	).Scan(&count).Error; err != nil {
+		return fmt.Errorf("check index existence: %w", err)
+	}
+	if count > 0 {
+		return nil
+	}
+	stmt := fmt.Sprintf("CREATE INDEX %s ON %s (%s)", idx.name, idx.table, idx.columns)
+	if err := db.DB.Exec(stmt).Error; err != nil {
+		return fmt.Errorf("create index %q: %w", stmt, err)
+	}
+	return nil
+}
 
 // RunMigrations performs schema migration using GORM AutoMigrate followed by
 // raw SQL statements that add indexes and constraints GORM cannot express.
@@ -23,48 +52,39 @@ func RunMigrations(db *DB) error {
 		&models.APIKey{},
 		&models.Submission{},
 		&models.ExecutionLog{},
+		&models.Webhook{},
+		&models.Batch{},
 	); err != nil {
 		return fmt.Errorf("migrations: auto-migrate failed: %w", err)
 	}
 
-	// Raw SQL for indexes and constraints GORM cannot express declaratively.
-	statements := []string{
+	// Secondary indexes GORM does not declare via tags. MySQL has no
+	// `CREATE INDEX IF NOT EXISTS` and no partial (WHERE) indexes, so each
+	// index is created only when absent (checked via information_schema) and
+	// the partial predicates are dropped — the columns are still indexed, the
+	// optimiser simply scans the full index. Redundant ones (unique email,
+	// unique key_hash, batch_id) are already covered by GORM `uniqueIndex` /
+	// `index` tags and are intentionally omitted here.
+	indexes := []indexSpec{
 		// submissions – composite covering index for list queries ordered by time
-		`CREATE INDEX IF NOT EXISTS idx_submissions_status_created
-			ON submissions (status_id, created_at DESC)`,
-
-		// submissions – partial index for pending / processing work (queue workers)
-		`CREATE INDEX IF NOT EXISTS idx_submissions_pending
-			ON submissions (created_at ASC)
-			WHERE status_id IN (1, 2)`,
-
-		// submissions – worker look-up (only rows with a worker assigned)
-		`CREATE INDEX IF NOT EXISTS idx_submissions_worker
-			ON submissions (worker_id)
-			WHERE worker_id IS NOT NULL AND worker_id <> ''`,
-
+		{table: "submissions", name: "idx_submissions_status_created", columns: "status_id, created_at"},
+		// submissions – worker look-up
+		{table: "submissions", name: "idx_submissions_worker", columns: "worker_id"},
 		// execution_logs – token look-up with time ordering
-		`CREATE INDEX IF NOT EXISTS idx_exec_logs_token_created
-			ON execution_logs (token, created_at DESC)`,
-
-		// api_keys – partial index for active keys only
-		`CREATE INDEX IF NOT EXISTS idx_api_keys_active
-			ON api_keys (key_hash)
-			WHERE is_active = true`,
-
+		{table: "execution_logs", name: "idx_exec_logs_token_created", columns: "token, created_at"},
+		// batches – list / sweep by creation time
+		{table: "batches", name: "idx_batches_created", columns: "created_at"},
+		// batches – bulk webhook re-delivery: filter by webhook_status, keyset on id
+		{table: "batches", name: "idx_batches_webhook_status", columns: "webhook_status, id"},
+		// batches – bulk start of pending batches: filter by status, keyset on id
+		{table: "batches", name: "idx_batches_status", columns: "status, id"},
 		// api_keys – expiry sweeper
-		`CREATE INDEX IF NOT EXISTS idx_api_keys_expires
-			ON api_keys (expires_at)
-			WHERE expires_at IS NOT NULL`,
-
-		// users – case-insensitive unique email index
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower
-			ON users (LOWER(email))`,
+		{table: "api_keys", name: "idx_api_keys_expires", columns: "expires_at"},
 	}
 
-	for _, stmt := range statements {
-		if err := db.DB.Exec(stmt).Error; err != nil {
-			return fmt.Errorf("migrations: failed to execute SQL %q: %w", stmt, err)
+	for _, idx := range indexes {
+		if err := ensureIndex(db, idx); err != nil {
+			return fmt.Errorf("migrations: ensure index %s: %w", idx.name, err)
 		}
 	}
 
@@ -130,5 +150,39 @@ func MigrateAndSeed(db *DB) error {
 	if err := SeedStatuses(db); err != nil {
 		return err
 	}
-	return SeedLanguages(db)
+	if err := SeedLanguages(db); err != nil {
+		return err
+	}
+	return EnforceLanguageActive(db)
+}
+
+// EnforceLanguageActive makes the DB's is_active flags match the policy declared
+// in models.DefaultLanguages(). It uses explicit UPDATEs rather than the upsert
+// because GORM omits zero-value fields (is_active=false) from the insert, so
+// `ON DUPLICATE KEY UPDATE is_active=VALUES(is_active)` can never set false.
+// Running it on every startup keeps the enabled set source-driven.
+func EnforceLanguageActive(db *DB) error {
+	langs := models.DefaultLanguages()
+	activeIDs := make([]int, 0, len(langs))
+	for _, l := range langs {
+		if l.IsActive {
+			activeIDs = append(activeIDs, l.ID)
+		}
+	}
+	// 1) Reset everything to inactive.
+	if err := db.DB.Model(&models.Language{}).
+		Where("id > 0").
+		Update("is_active", false).Error; err != nil {
+		return fmt.Errorf("migrations: reset language active flags: %w", err)
+	}
+	// 2) Activate exactly the policy's active set.
+	if len(activeIDs) > 0 {
+		if err := db.DB.Model(&models.Language{}).
+			Where("id IN ?", activeIDs).
+			Update("is_active", true).Error; err != nil {
+			return fmt.Errorf("migrations: set active languages: %w", err)
+		}
+	}
+	db.log.Info("language active policy enforced", zap.Int("active", len(activeIDs)))
+	return nil
 }

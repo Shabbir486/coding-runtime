@@ -1,0 +1,143 @@
+# eksctl cluster config — production EKS with IRSA (keyless AWS) for Code Runtime.
+#
+#   eksctl create cluster -f cluster.yaml
+#
+# Region note: this cluster is placed in the Aurora region (ap-southeast-2) so
+# per-request DB latency is local. Your SQS queues are in us-east-2 — that's
+# fine (queue access is async), but co-locating SQS + EKS + Aurora in ONE region
+# is recommended for production. Change `region` + the queue ARNs to match.
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: coderuntime
+  region: ap-southeast-2
+  version: "1.32"
+  tags:
+    project: coderuntime
+
+# Reuse the EXISTING default VPC where the RDS/Aurora DB lives, so pods reach the
+# private DB on the same network (no VPC peering). Default VPC has only public
+# subnets, so nodes run in public subnets (acceptable here; for hardened prod use
+# a VPC with private subnets + NAT). Discovered in Phase 1 (see aws.readme).
+vpc:
+  id: vpc-0c19448c00a89ccb8
+  subnets:
+    public:
+      ap-southeast-2a: { id: subnet-09b8927e9af369a62 }
+      ap-southeast-2b: { id: subnet-09c936e6e575c677a }
+      ap-southeast-2c: { id: subnet-0bdff67df02afc941 }
+
+# IRSA: OIDC provider lets ServiceAccounts assume IAM roles — no static AWS keys.
+iam:
+  withOIDC: true
+  serviceAccounts:
+    # api-gateway: publishes jobs to SQS.
+    - metadata:
+        name: api-gateway
+        namespace: coderuntime
+      attachPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+            Resource:
+              - arn:aws:sqs:ap-southeast-2:768054003064:code-submission-processing-queue
+              - arn:aws:sqs:ap-southeast-2:768054003064:code-submission-completed-queue
+    # worker: consumes + deletes jobs, extends visibility, reads start queue.
+    - metadata:
+        name: worker
+        namespace: coderuntime
+      attachPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:ChangeMessageVisibility
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+              # SendMessage: the start-consumer fans out a batch by publishing its
+              # submissions to the jobs queue on a START_BATCH_PROCESSING event.
+              # Without this the SQS-triggered start path fails with 403 AccessDenied.
+              - sqs:SendMessage
+            Resource:
+              - arn:aws:sqs:ap-southeast-2:768054003064:code-submission-processing-queue
+              - arn:aws:sqs:ap-southeast-2:768054003064:code-submission-completed-queue
+          # ECR: the worker fetches its OWN pull token via IRSA (self-refreshing),
+          # so no static ecr-registry-auth secret / CronJob / restarts are needed.
+          - Effect: Allow
+            Action:
+              - ecr:GetAuthorizationToken
+            Resource: ["*"]
+          - Effect: Allow
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchCheckLayerAvailability
+            Resource:
+              - arn:aws:ecr:ap-southeast-2:768054003064:repository/code-runtime-*
+    # queue-manager: DLQ drainer + depth polling.
+    - metadata:
+        name: queue-manager
+        namespace: coderuntime
+      attachPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:SendMessage
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+            Resource:
+              - arn:aws:sqs:ap-southeast-2:768054003064:*
+    # KEDA operator: reads queue depth to drive worker scaling.
+    - metadata:
+        name: keda-operator
+        namespace: keda
+      attachPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+            Resource:
+              - arn:aws:sqs:ap-southeast-2:768054003064:*
+# Single managed nodegroup that hosts EVERYTHING (api, queue-manager, KEDA,
+# cluster-autoscaler, metrics-server, redis, AND the KEDA-scaled worker pods).
+# cluster-autoscaler grows/shrinks this nodegroup's ASG on demand — there is no
+# Karpenter and no separate worker nodegroup in this deployment.
+managedNodeGroups:
+  - name: system
+    # m7i-flex.large (2 vCPU, 8GB) — Free-Tier-eligible (this account is
+    # restricted to free-tier instance types).
+    instanceType: m7i-flex.large
+    # Scale 1 -> 12, driven by cluster-autoscaler (it reads these bounds from the
+    # ASG). Start at ONE node to minimise cost; CA adds nodes when KEDA-scaled
+    # worker pods go Pending, and scales back down to 1 when the backlog drains.
+    desiredCapacity: 1
+    minSize: 1
+    maxSize: 12
+    volumeSize: 50
+    privateNetworking: false   # default VPC has only public subnets
+    labels:
+      node-type: system
+    # propagateASGTags puts these on the ASG so cluster-autoscaler's
+    # --node-group-auto-discovery=asg:tag=... actually finds this nodegroup.
+    propagateASGTags: true
+    tags:
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/coderuntime: "owned"
+
+addons:
+  - name: vpc-cni
+  - name: coredns
+  - name: kube-proxy
+  - name: aws-ebs-csi-driver

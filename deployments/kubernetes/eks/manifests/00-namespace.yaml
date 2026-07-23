@@ -1,0 +1,11 @@
+# Namespace for all Code Runtime workloads.
+# PodSecurity is set to "privileged" because the worker's dind sidecar runs
+# privileged (it hosts a Docker daemon that launches the sandbox containers).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coderuntime
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/audit: privileged

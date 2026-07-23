@@ -38,15 +38,19 @@ info:
 
 servers:
   - url: http://localhost:8002
-    description: Local development
-  - url: https://api.coderuntime.io
-    description: Production
+    description: Local environment
+  - url: https://code-executor.revature.com/code-service
+    description: QA environment
 
 tags:
   - name: auth
     description: Token and API key management
   - name: submissions
     description: Code submission lifecycle
+  - name: batches
+    description: Group submissions under a batch_id and deliver results via webhook
+  - name: webhooks
+    description: Register outbound notification endpoints
   - name: languages
     description: Supported programming languages
   - name: statuses
@@ -255,6 +259,125 @@ components:
           example:
             - "550e8400-e29b-41d4-a716-446655440000"
             - "550e8400-e29b-41d4-a716-446655440001"
+
+    # --- Batch (batch_id-tracked) ---
+    CreateBatchRequest:
+      type: object
+      required:
+        - submissions
+      properties:
+        submissions:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/SubmissionRequest'
+          description: Array of up to 20 submission requests
+        webhook_id:
+          type: string
+          format: uuid
+          description: Optional webhook to deliver the batch result to on completion
+          example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+
+    CreateBatchResponse:
+      type: object
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+          description: Identifier grouping all submissions; use it to retrieve results
+          example: "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+        tokens:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Per-submission tokens in request order
+        total:
+          type: integer
+          example: 3
+        status:
+          type: string
+          enum: [pending, processing, completed]
+          example: "pending"
+
+    BatchResponse:
+      type: object
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, processing, completed]
+        total:
+          type: integer
+          example: 3
+        completed:
+          type: integer
+          description: Number of submissions that reached a terminal state
+          example: 3
+        webhook_id:
+          type: string
+          format: uuid
+          nullable: true
+        webhook_status:
+          type: string
+          enum: [pending, sent, failed]
+          example: "sent"
+        webhook_sent_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        submissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmissionResponse'
+
+    # --- Webhook ---
+    RegisterWebhookRequest:
+      type: object
+      required:
+        - name
+        - url
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: "results-sink"
+        url:
+          type: string
+          format: uri
+          description: Endpoint that receives the batch result via HTTP POST
+          example: "https://example.com/hooks/code-runtime"
+        api_key:
+          type: string
+          description: |
+            Outbound key sent in the `X-API-Key` header when delivering to the
+            webhook so the receiver can authenticate the call. Generated if omitted.
+
+    WebhookResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        api_key:
+          type: string
+          description: Returned only on registration (shown once)
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
 
     Language:
       type: object
@@ -926,6 +1049,359 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /batches:
+    post:
+      tags: [batches]
+      summary: Create a batch and return a batch_id (does NOT start execution)
+      description: |
+        Atomically persists up to 20 submissions under a single `batch_id` in
+        **PENDING** state and returns the `batch_id` + tokens. Execution is NOT
+        started here — call `POST /batches/{id}/start` (or publish a
+        START_BATCH_PROCESSING event) once you have committed your own
+        token/batch persistence. The linked webhook (if any) fires only after
+        the started batch completes.
+      security:
+        - BearerAuth: []
+        - APIKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBatchRequest'
+      responses:
+        "201":
+          description: Batch created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateBatchResponse'
+        "400":
+          description: Validation error or unknown webhook_id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /batches/start-pending:
+    post:
+      tags: [batches]
+      summary: Bulk-start every pending batch (admin)
+      description: |
+        Starts execution for EVERY batch stuck in the `pending` **batch** status
+        (created but never started). Starting fans the batch's submissions onto
+        the queue; when the batch later completes, its linked webhook fires
+        automatically — so this recovers batches that never ran (unlike
+        `POST /webhooks/retrigger`, which only re-delivers already-completed
+        batches). Optimised for large backlogs: batch IDs are walked in
+        keyset-paginated, id-only pages and started with bounded concurrency, so
+        it does not spike CPU/memory or the database. Runs in the background and
+        returns `202` immediately with the matched count. Starting flips a batch
+        `pending → processing` (leaving the set) and is idempotent, so the call
+        is safely re-runnable. Admin-only.
+      security:
+        - BearerAuth: []
+        - APIKeyAuth: []
+      responses:
+        "202":
+          description: Start accepted; running in the background
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matched: { type: integer, format: int64, example: 340 }
+                  page_size: { type: integer, example: 200 }
+                  concurrency: { type: integer, example: 8 }
+                  message: { type: string }
+        "200":
+          description: No pending batches to start
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matched: { type: integer, example: 0 }
+                  message: { type: string }
+        "403":
+          description: Admin privileges required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /batches/{id}:
+    get:
+      tags: [batches]
+      summary: Get batch progress and all submission results by batch_id
+      security:
+        - BearerAuth: []
+        - APIKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Batch detail with every submission's current result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+        "404":
+          description: Batch not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /batches/{id}/start:
+    post:
+      tags: [batches]
+      summary: Start execution for a previously-created batch
+      description: |
+        Triggers execution of a PENDING batch: transitions it to PROCESSING and
+        fans every submission out to the job queue. Idempotent — starting an
+        already-started or finished batch is a no-op. Equivalent to publishing a
+        START_BATCH_PROCESSING event to the start queue. Call this AFTER your
+        service has committed its submission/token persistence.
+      security:
+        - BearerAuth: []
+        - APIKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "202":
+          description: Execution started (batch transitioned to processing)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch_id: { type: string, format: uuid }
+                  status: { type: string, example: processing }
+        "200":
+          description: Already started or finished (idempotent no-op)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch_id: { type: string, format: uuid }
+                  status: { type: string, example: already_started }
+        "404":
+          description: Batch not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /batches/{id}/callback:
+    post:
+      tags: [batches]
+      summary: Re-deliver the batch result to its linked webhook
+      description: |
+        Re-fires the webhook event for an existing batch. Useful when the
+        original delivery failed or the receiver needs the payload again.
+      security:
+        - BearerAuth: []
+        - APIKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Webhook delivered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch_id:
+                    type: string
+                    format: uuid
+                  webhook_status:
+                    type: string
+                    example: "sent"
+        "400":
+          description: Batch has no linked webhook
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: Batch not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "502":
+          description: Webhook delivery failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /webhooks:
+    post:
+      tags: [webhooks]
+      summary: Register an outbound webhook
+      description: |
+        Registers an endpoint that receives batch results. The `api_key` is
+        sent in the `X-API-Key` header on every outbound delivery so the
+        receiver can authenticate the call; it is generated and returned once
+        if not supplied.
+      security:
+        - BearerAuth: []
+        - APIKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterWebhookRequest'
+      responses:
+        "201":
+          description: Webhook registered (api_key shown once)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResponse'
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      tags: [webhooks]
+      summary: List webhooks owned by the caller
+      security:
+        - BearerAuth: []
+        - APIKeyAuth: []
+      responses:
+        "200":
+          description: Webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhooks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WebhookResponse'
+
+  /webhooks/retrigger:
+    post:
+      tags: [webhooks]
+      summary: Bulk re-deliver batch webhooks by status (admin)
+      description: |
+        Re-delivers the webhook for EVERY completed batch currently in the given
+        `webhook_status` — `pending` (never delivered) or `failed` (delivery
+        previously failed). Optimised for large backlogs: batch IDs are walked in
+        keyset-paginated, id-only pages and delivered with bounded concurrency, so
+        it does not spike CPU/memory or the database. Runs in the background and
+        returns `202` immediately with the matched count. A successful delivery
+        flips a batch to `sent`; failures stay `failed`, so the call is safely
+        re-runnable to drain stragglers. Admin-only.
+      security:
+        - BearerAuth: []
+        - APIKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [pending, failed]
+                  description: Which webhook_status to re-deliver.
+      responses:
+        "202":
+          description: Re-delivery accepted; running in the background
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: failed }
+                  matched: { type: integer, format: int64, example: 1280 }
+                  page_size: { type: integer, example: 200 }
+                  concurrency: { type: integer, example: 8 }
+                  message: { type: string }
+        "200":
+          description: No eligible batches for this status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  matched: { type: integer, example: 0 }
+                  message: { type: string }
+        "400":
+          description: Invalid status (must be pending or failed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Admin privileges required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /webhooks/{id}:
+    get:
+      tags: [webhooks]
+      summary: Get a webhook by id
+      security:
+        - BearerAuth: []
+        - APIKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Webhook detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResponse'
+        "404":
+          description: Webhook not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /submissions/batch:
     post:
       tags: [submissions]
@@ -994,7 +1470,10 @@ paths:
     get:
       tags: [submissions]
       summary: Get batch of submissions by tokens
-      description: Retrieve multiple submissions in a single request. Tokens are comma-separated.
+      description: |
+        Retrieve multiple submissions in a single request. Tokens are
+        comma-separated (max 20). Found submissions are returned in request
+        order; tokens that do not resolve are omitted from the array.
       parameters:
         - name: tokens
           in: path
@@ -1003,22 +1482,29 @@ paths:
             type: string
           description: Comma-separated list of submission tokens (max 20)
           example: "550e8400-e29b-41d4-a716-446655440000,550e8400-e29b-41d4-a716-446655440001"
-        - name: base64_encoded
-          in: query
-          schema:
-            type: boolean
-            default: false
       responses:
         "200":
-          description: Array of submission responses
+          description: Array of submission responses (omitting any unknown tokens)
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/SubmissionResponse'
+        "400":
+          description: No tokens supplied, a malformed UUID, or more than 20 tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "401":
           description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "404":
+          description: None of the supplied tokens matched a submission
           content:
             application/json:
               schema:
@@ -1159,9 +1645,21 @@ paths:
   /languages:
     get:
       tags: [languages]
-      summary: List all languages
-      description: Returns all supported programming languages with metadata.
-      security: []
+      summary: List languages (optionally filtered by active state)
+      description: |
+        Returns supported languages with metadata. Use the `isActive` query
+        param to filter: `true` = active only, `false` = inactive only, omitted
+        = all.
+      # Inherits the global security (BearerAuth / APIKeyAuth) — this endpoint is
+      # behind the auth middleware, so Swagger must attach the token.
+      parameters:
+        - name: isActive
+          in: query
+          required: false
+          description: "Filter by active state. true = active, false = inactive, omit = all."
+          schema:
+            type: boolean
+          example: true
       responses:
         "200":
           description: Array of languages
@@ -1199,7 +1697,7 @@ paths:
     get:
       tags: [languages]
       summary: Get a language by ID
-      security: []
+      # Inherits the global security (BearerAuth / APIKeyAuth) — auth required.
       parameters:
         - name: id
           in: path
@@ -1215,6 +1713,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Language'
+        "404":
+          description: Language not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags: [languages]
+      summary: Activate or deactivate a language by ID (admin only)
+      description: |
+        Flips a language's `is_active` flag. Send `{"is_active": false}` to
+        deactivate a runtime or `{"is_active": true}` to re-enable it.
+        Requires an **admin** token.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          example: 40
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_active]
+              properties:
+                is_active:
+                  type: boolean
+                  example: false
+      responses:
+        "200":
+          description: Updated language
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Language'
+        "400":
+          description: Invalid id or body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "403":
+          description: Admin access required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         "404":
           description: Language not found
           content:

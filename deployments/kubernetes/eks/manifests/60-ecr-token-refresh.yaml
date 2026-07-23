@@ -1,0 +1,94 @@
+# ---------------------------------------------------------------------------
+# ECR pull-token auto-refresh.
+#
+# The worker pulls the private code-runtime-* images using the X-Registry-Auth
+# in the `ecr-registry-auth` secret. That ECR token expires every ~12h, after
+# which execution fails with "authorization token has expired" -> Internal Error.
+#
+# This CronJob refreshes the token every 6h and rolls the worker so it picks up
+# the new value (envFrom secrets are only read at container start).
+#
+# The ServiceAccount `ecr-token-refresher` is created out-of-band via eksctl
+# (IRSA, keyless) with the ecr:GetAuthorizationToken policy — see deploy.sh /
+# DEPLOY.md. This file provides the in-cluster RBAC + the schedule.
+# ---------------------------------------------------------------------------
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ecr-token-refresher
+  namespace: coderuntime
+rules:
+  # Update the ecr-registry-auth secret.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  # Roll the worker deployment so it re-reads the refreshed secret.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ecr-token-refresher
+  namespace: coderuntime
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ecr-token-refresher
+subjects:
+  - kind: ServiceAccount
+    name: ecr-token-refresher
+    namespace: coderuntime
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ecr-token-refresh
+  namespace: coderuntime
+  labels:
+    app.kubernetes.io/name: ecr-token-refresh
+spec:
+  schedule: "0 */6 * * *"        # every 6 hours (token TTL is ~12h)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: ecr-token-refresh
+        spec:
+          serviceAccountName: ecr-token-refresher   # IRSA: ecr:GetAuthorizationToken
+          restartPolicy: OnFailure
+          containers:
+            - name: refresh
+              image: alpine/k8s:1.32.0               # bundles aws-cli + kubectl
+              env:
+                - name: AWS_REGION
+                  value: ap-southeast-2
+                - name: REGISTRY
+                  value: 768054003064.dkr.ecr.ap-southeast-2.amazonaws.com
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  echo "fetching fresh ECR token..."
+                  TOKEN=$(aws ecr get-login-password --region "$AWS_REGION")
+                  XAUTH=$(printf '{"username":"AWS","password":"%s","serveraddress":"%s"}' "$TOKEN" "$REGISTRY" | base64 | tr -d '\n')
+                  echo "updating ecr-registry-auth secret..."
+                  kubectl create secret generic ecr-registry-auth -n coderuntime \
+                    --from-literal=CODERUNTIME_DOCKER_REGISTRY="$REGISTRY" \
+                    --from-literal=CODERUNTIME_DOCKER_REGISTRY_AUTH="$XAUTH" \
+                    --dry-run=client -o yaml | kubectl apply -f -
+                  echo "rolling worker to pick up the new token..."
+                  kubectl -n coderuntime rollout restart deployment/worker
+                  echo "done."
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits:   { cpu: 200m, memory: 256Mi }
